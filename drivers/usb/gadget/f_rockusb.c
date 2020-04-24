@@ -76,9 +76,9 @@ int g_dnl_bind_fixup(struct usb_device_descriptor *dev, const char *name)
 		/* Enumerate as a loader device */
 		dev->bcdUSB = cpu_to_le16(0x0201);
 	} else if (!strncmp(name, "usb_dnl_fastboot", 16)) {
-		/* Fix to Google's VID and PID */
-		dev->idVendor  = __constant_cpu_to_le16(0x18d1);
-		dev->idProduct = __constant_cpu_to_le16(0xd00d);
+		/* Fix to ASUS's VID and PID */
+		dev->idVendor  = __constant_cpu_to_le16(0x0b05);
+		dev->idProduct = __constant_cpu_to_le16(0x7771);
 	}
 
 	return 0;
