@@ -324,10 +324,17 @@ static unsigned long hw_parse_property(char *text, struct hw_config *hw_conf)
 static void parse_hw_config(struct hw_config *hw_conf)
 {
 	unsigned long count, offset = 0, addr, size;
-	char *file_addr;
+	char *file_addr, *dev_part;
 	static char *fs_argv[5];
 
 	int valid = 0;
+
+	dev_part = env_get("devnum");
+	if (!dev_part) {
+		printf("Can't get devnum\n");
+		dev_part = "0";
+	}
+	strncat(dev_part, ":7", 3);
 
 	file_addr = env_get("conf_addr");
 	if (!file_addr) {
@@ -341,7 +348,7 @@ static void parse_hw_config(struct hw_config *hw_conf)
 
 	fs_argv[0] = "ext2load";
 	fs_argv[1] = "mmc";
-	fs_argv[2] = "0:7";
+	fs_argv[2] = dev_part;
 	fs_argv[3] = file_addr;
 	fs_argv[4] = "config.txt";
 
@@ -557,12 +564,19 @@ static int fdt_valid(struct fdt_header **blobp)
 static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, char *overlay_name)
 {
 	unsigned long addr;
-	char *file_addr;
+	char *file_addr, *dev_part;
 	struct fdt_header *blob;
 	int ret;
 	char overlay_file[] = "overlays/";
 
 	static char *fs_argv[5];
+
+	dev_part = env_get("devnum");
+	if (!dev_part) {
+		printf("Can't get devnum\n");
+		dev_part = "0";
+	}
+	strncat(dev_part, ":7", 3);
 
 	file_addr = env_get("fdt_overlay_addr");
 	if (!file_addr) {
@@ -577,7 +591,7 @@ static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, c
 
 	fs_argv[0] = "ext2load";
 	fs_argv[1] = "mmc";
-	fs_argv[2] = "0:7";
+	fs_argv[2] = dev_part;
 	fs_argv[3] = file_addr;
 	fs_argv[4] = overlay_file;
 
