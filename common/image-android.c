@@ -35,6 +35,7 @@ DECLARE_GLOBAL_DATA_PTR;
 #define ANDROID_ROCKCHIP_LEGACY_PAGE_SIZE	0x4000
 
 #define MAX_OVERLAY_NAME_LENGTH 128
+#define MAX_OVERLAY_COUNT 20
 struct hw_config
 {
 	int valid;
@@ -51,7 +52,9 @@ struct hw_config
 	int gmac;
 
 	int overlay_count;
-	char **overlay_file;
+	char *overlay_file[MAX_OVERLAY_COUNT];
+
+	char *dev_part;
 };
 
 static unsigned long hw_skip_comment(char *text)
@@ -263,7 +266,7 @@ static int set_file_conf(char *text, struct hw_config *hw_conf, int start_point,
 
 	name_length = file_ptr - start_point;
 
-	if(name_length && name_length < MAX_OVERLAY_NAME_LENGTH) {
+	if(name_length && name_length < MAX_OVERLAY_NAME_LENGTH && hw_conf->overlay_count < MAX_OVERLAY_COUNT) {
 		ptr = (char*)calloc(MAX_OVERLAY_NAME_LENGTH, sizeof(char));
 		memcpy(ptr, text + start_point, name_length);
 		ptr[name_length] = 0x00;
@@ -335,6 +338,7 @@ static void parse_hw_config(struct hw_config *hw_conf)
 		dev_part = "0";
 	}
 	strncat(dev_part, ":7", 3);
+	hw_conf->dev_part = dev_part;
 
 	file_addr = env_get("conf_addr");
 	if (!file_addr) {
@@ -561,22 +565,15 @@ static int fdt_valid(struct fdt_header **blobp)
 	return 1;
 }
 
-static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, char *overlay_name)
+static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, char *overlay_name, struct hw_config *hw_conf)
 {
 	unsigned long addr;
-	char *file_addr, *dev_part;
+	char *file_addr;
 	struct fdt_header *blob;
 	int ret;
 	char overlay_file[] = "overlays/";
 
 	static char *fs_argv[5];
-
-	dev_part = env_get("devnum");
-	if (!dev_part) {
-		printf("Can't get devnum\n");
-		dev_part = "0";
-	}
-	strncat(dev_part, ":7", 3);
 
 	file_addr = env_get("fdt_overlay_addr");
 	if (!file_addr) {
@@ -591,7 +588,7 @@ static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, c
 
 	fs_argv[0] = "ext2load";
 	fs_argv[1] = "mmc";
-	fs_argv[2] = dev_part;
+	fs_argv[2] = hw_conf->dev_part;
 	fs_argv[3] = file_addr;
 	fs_argv[4] = overlay_file;
 
@@ -628,7 +625,7 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 #ifdef CONFIG_OF_LIBFDT_OVERLAY
 	int i;
 	for (i = 0; i < hw_conf->overlay_count; i++) {
-		if (merge_dts_overlay(cmdtp, working_fdt, hw_conf->overlay_file[i]) < 0)
+		if (merge_dts_overlay(cmdtp, working_fdt, hw_conf->overlay_file[i], hw_conf) < 0)
 			printf("Can't merge dts overlay: %s\n", hw_conf->overlay_file[i]);
 		else
 			printf("Merged dts overlay: %s\n", hw_conf->overlay_file[i]);
