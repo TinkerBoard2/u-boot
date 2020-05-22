@@ -10,6 +10,7 @@
 #include <android_avb/avb_ops_user.h>
 #include <android_avb/rk_avb_ops_user.h>
 #include <android_image.h>
+#include <bootm.h>
 #include <asm/arch/hotkey.h>
 #include <cli.h>
 #include <common.h>
@@ -480,11 +481,9 @@ static int sysmem_alloc_uncomp_kernel(ulong andr_hdr,
 
 		kaddr = uncomp_kaddr;
 		ksize = ALIGN(ksize, 512);
-		if (!sysmem_alloc_base(MEMBLK_ID_UNCOMP_KERNEL,
+		if (!sysmem_alloc_base(MEM_UNCOMP_KERNEL,
 				       (phys_addr_t)kaddr, ksize))
 			return -ENOMEM;
-
-		hotkey_run(HK_SYSMEM);
 	}
 
 	return 0;
@@ -494,7 +493,7 @@ int android_bootloader_boot_kernel(unsigned long kernel_address)
 {
 	char *kernel_addr_r = env_get("kernel_addr_r");
 	char *kernel_addr_c = env_get("kernel_addr_c");
-	char *fdt_addr = env_get("fdt_addr");
+	char *fdt_addr = env_get("fdt_addr_r");
 	char kernel_addr_str[12];
 	char comp_str[32] = {0};
 	ulong comp_type;
@@ -508,7 +507,7 @@ int android_bootloader_boot_kernel(unsigned long kernel_address)
 		[IH_COMP_ZIMAGE]= "ZIMAGE",
 	};
 	char *bootm_args[] = {
-		"bootm", kernel_addr_str, kernel_addr_str, fdt_addr, NULL };
+		kernel_addr_str, kernel_addr_str, fdt_addr, NULL };
 
 	comp_type = env_get_ulong("os_comp", 10, 0);
 	sprintf(kernel_addr_str, "0x%08lx", kernel_address);
@@ -540,12 +539,15 @@ int android_bootloader_boot_kernel(unsigned long kernel_address)
 				       comp_type))
 		return -1;
 
-	/* Check sysmem overflow */
-	sysmem_overflow_check();
-
-	do_bootm(NULL, 0, 4, bootm_args);
-
-	return -1;
+	return do_bootm_states(NULL, 0, ARRAY_SIZE(bootm_args), bootm_args,
+		BOOTM_STATE_START |
+		BOOTM_STATE_FINDOS | BOOTM_STATE_FINDOTHER |
+		BOOTM_STATE_LOADOS |
+#ifdef CONFIG_SYS_BOOT_RAMDISK_HIGH
+		BOOTM_STATE_RAMDISK |
+#endif
+		BOOTM_STATE_OS_PREP | BOOTM_STATE_OS_FAKE_GO |
+		BOOTM_STATE_OS_GO, &images, 1);
 }
 
 static char *strjoin(const char **chunks, char separator)
@@ -778,15 +780,11 @@ static AvbSlotVerifyResult android_slot_verify(char *boot_partname,
 		/* Reserve page_size */
 		hdr = (void *)slot_data[0]->loaded_partitions->data;
 		load_address -= hdr->page_size;
+		if (android_image_memcpy_separate(hdr, &load_address)) {
+			printf("Failed to separate copy android image\n");
+			return AVB_SLOT_VERIFY_RESULT_ERROR_IO;
+		}
 		*android_load_address = load_address;
-
-#ifdef CONFIG_ANDROID_BOOT_IMAGE_SEPARATE
-		android_image_memcpy_separate(hdr, (void *)load_address);
-#else
-		memcpy((uint8_t *)load_address,
-		       slot_data[0]->loaded_partitions->data,
-		       slot_data[0]->loaded_partitions->data_size);
-#endif
 	} else {
 		slot_set_unbootable(&ab_data.slots[slot_index_to_boot]);
 	}
@@ -1033,7 +1031,7 @@ int android_fdt_overlay_apply(void *fdt_addr)
 		if (sysmem_free((phys_addr_t)fdt_addr))
 			goto out;
 
-		if (!sysmem_alloc_base(MEMBLK_ID_FDT_DTBO,
+		if (!sysmem_alloc_base(MEM_FDT_DTBO,
 				       (phys_addr_t)fdt_addr,
 					fdt_size + CONFIG_SYS_FDT_PAD))
 			goto out;
@@ -1055,9 +1053,9 @@ out:
 }
 #endif
 
-static int load_android_image(struct blk_desc *dev_desc,
-			      char *boot_partname,
-			      unsigned long *load_address)
+int android_image_load_by_partname(struct blk_desc *dev_desc,
+				   const char *boot_partname,
+				   unsigned long *load_address)
 {
 	disk_partition_t boot_part;
 	int ret, part_num;
@@ -1087,12 +1085,10 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	enum android_boot_mode mode = ANDROID_BOOT_MODE_NORMAL;
 	disk_partition_t misc_part_info;
 	int part_num;
-	int ret;
 	char *command_line;
 	char slot_suffix[3] = {0};
 	const char *mode_cmdline = NULL;
 	char *boot_partname = ANDROID_PARTITION_BOOT;
-	ulong fdt_addr;
 
 	/*
 	 * 1. Load MISC partition and determine the boot mode
@@ -1189,8 +1185,9 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 			printf("Not AVB images, AVB skip\n");
 			env_update("bootargs",
 				   "androidboot.verifiedbootstate=orange");
-			if (load_android_image(dev_desc, boot_partname,
-					       &load_address)) {
+			if (android_image_load_by_partname(dev_desc,
+							   boot_partname,
+							   &load_address)) {
 				printf("Android image load failed\n");
 				return -1;
 			}
@@ -1210,7 +1207,9 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	 * 2. Load the boot/recovery from the desired "boot" partition.
 	 * Determine if this is an AOSP image.
 	 */
-	if (load_android_image(dev_desc, boot_partname, &load_address)) {
+	if (android_image_load_by_partname(dev_desc,
+					   boot_partname,
+					   &load_address)) {
 		printf("Android image load failed\n");
 		return -1;
 	}
@@ -1246,10 +1245,6 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 				       ANDROID_ARG_FDT_FILENAME)) {
 		printf("Can not get the fdt data from oem!\n");
 	}
-#else
-	ret = android_image_get_fdt((void *)load_address, &fdt_addr);
-	if (!ret)
-		env_set_hex("fdt_addr", fdt_addr);
 #endif
 #ifdef CONFIG_OPTEE_CLIENT
 	if (trusty_notify_optee_uboot_end())

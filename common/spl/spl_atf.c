@@ -80,7 +80,18 @@ bl33_setup:
 	bl33_ep_info->pc = bl33_entry;
 	bl33_ep_info->spsr = SPSR_64(MODE_EL2, MODE_SP_ELX,
 				     DISABLE_ALL_EXECPTIONS);
-
+#if defined(CONFIG_SPL_KERNEL_BOOT) && defined(CONFIG_ARM64)
+	/*
+	 * Reference: arch/arm/lib/bootm.c
+	 * boot_jump_linux(bootm_headers_t *images, int flag)
+	 * {
+	 * 	......
+	 * 	armv8_switch_to_el2((u64)images->ft_addr, 0, 0, 0,
+	 * 			   images->ep, ES_TO_AARCH64);
+	 * }
+	 */
+	bl33_ep_info->args.arg0 = CONFIG_SPL_FDT_ADDR;
+#endif
 	bl2_to_bl31_params->bl33_image_info = &bl31_params_mem.bl33_image_info;
 	SET_PARAM_HEAD(bl2_to_bl31_params->bl33_image_info,
 		       ATF_PARAM_IMAGE_BINARY, ATF_VERSION_1, 0);
@@ -102,21 +113,6 @@ void bl31_entry(uintptr_t bl31_entry, uintptr_t bl32_entry,
 	atf_entry_t  atf_entry = (atf_entry_t)bl31_entry;
 
 	bl31_params = bl2_plat_get_bl31_params(bl32_entry, bl33_entry);
-
-	raw_write_daif(SPSR_EXCEPTION_MASK);
-
-	/*
-	 * Turn off I-cache and invalidate it
-	 */
-	icache_disable();
-	invalidate_icache_all();
-
-	/*
-	 * turn off D-cache
-	 * dcache_disable() in turn flushes the d-cache and disables MMU
-	 */
-	dcache_disable();
-	invalidate_dcache_all();
 
 	atf_entry((void *)bl31_params, (void *)fdt_addr);
 }
@@ -201,6 +197,9 @@ void spl_invoke_atf(struct spl_image_info *spl_image)
 	 */
 	if (CONFIG_IS_ENABLED(ATF_NO_PLATFORM_PARAM))
 		platform_param = 0;
+
+	/* do cleanup */
+	spl_cleanup_before_jump(spl_image);
 
 	/*
 	 * We don't provide a BL3-2 entry yet, but this will be possible

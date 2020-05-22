@@ -37,6 +37,7 @@ typedef volatile unsigned char	vu_char;
 #include <part.h>
 #include <flash.h>
 #include <image.h>
+#include <stacktrace.h>
 
 /* Bring in printf format macros if inttypes.h is included */
 #define __STDC_FORMAT_MACROS
@@ -102,6 +103,7 @@ int	cpu_init(void);
 
 /* common/main.c */
 void	main_loop	(void);
+void autoboot_command_fail_handle(void);
 int run_command(const char *cmd, int flag);
 int run_command_repeatable(const char *cmd, int flag);
 

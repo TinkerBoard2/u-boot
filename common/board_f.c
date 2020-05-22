@@ -40,6 +40,7 @@
 #include <asm/sections.h>
 #include <dm/root.h>
 #include <linux/errno.h>
+#include <bidram.h>
 #include <sysmem.h>
 
 /*
@@ -184,6 +185,9 @@ static int show_dram_config(void)
 	size = gd->ram_size;
 #endif
 
+#ifdef CONFIG_BIDRAM
+	size += bidram_append_size();
+#endif
 	print_size(size, "");
 	board_add_ram_info(0);
 	putc('\n');
@@ -233,7 +237,7 @@ static int setup_mon_len(void)
 	gd->mon_len = (ulong)&_end - (ulong)_init;
 #elif defined(CONFIG_NIOS2) || defined(CONFIG_XTENSA)
 	gd->mon_len = CONFIG_SYS_MONITOR_LEN;
-#elif defined(CONFIG_NDS32) || defined(CONFIG_SH)
+#elif defined(CONFIG_NDS32) || defined(CONFIG_SH) || defined(CONFIG_RISCV)
 	gd->mon_len = (ulong)(&__bss_end) - (ulong)(&_start);
 #elif defined(CONFIG_SYS_MONITOR_BASE)
 	/* TODO: use (ulong)&__bss_end - (ulong)&__text_start; ? */
@@ -597,6 +601,9 @@ static int reloc_fdt(void)
 	if (gd->new_fdt) {
 		memcpy(gd->new_fdt, gd->fdt_blob, gd->fdt_size);
 		gd->fdt_blob = gd->new_fdt;
+#ifdef CONFIG_USING_KERNEL_DTB
+		gd->ufdt_blob = gd->new_fdt;
+#endif
 	}
 #endif
 
