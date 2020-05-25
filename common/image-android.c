@@ -53,8 +53,6 @@ struct hw_config
 
 	int overlay_count;
 	char *overlay_file[MAX_OVERLAY_COUNT];
-
-	char *dev_part;
 };
 
 static unsigned long hw_skip_comment(char *text)
@@ -327,18 +325,16 @@ static unsigned long hw_parse_property(char *text, struct hw_config *hw_conf)
 static void parse_hw_config(struct hw_config *hw_conf)
 {
 	unsigned long count, offset = 0, addr, size;
-	char *file_addr, *dev_part;
+	char *file_addr, *devnum;
 	static char *fs_argv[5];
 
 	int valid = 0;
 
-	dev_part = env_get("devnum");
-	if (!dev_part) {
+	devnum = env_get("devnum");
+	if (!devnum) {
 		printf("Can't get devnum\n");
-		dev_part = "0";
+		goto end;
 	}
-	strncat(dev_part, ":7", 3);
-	hw_conf->dev_part = dev_part;
 
 	file_addr = env_get("conf_addr");
 	if (!file_addr) {
@@ -352,7 +348,16 @@ static void parse_hw_config(struct hw_config *hw_conf)
 
 	fs_argv[0] = "ext2load";
 	fs_argv[1] = "mmc";
-	fs_argv[2] = dev_part;
+
+	if (!strcmp(devnum, "0"))
+		fs_argv[2] = "0:7";
+	else if (!strcmp(devnum, "1"))
+		fs_argv[2] = "1:7";
+	else {
+		printf("Invalid devnum\n");
+		goto end;
+	}
+
 	fs_argv[3] = file_addr;
 	fs_argv[4] = "config.txt";
 
@@ -565,15 +570,21 @@ static int fdt_valid(struct fdt_header **blobp)
 	return 1;
 }
 
-static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, char *overlay_name, struct hw_config *hw_conf)
+static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, char *overlay_name)
 {
 	unsigned long addr;
-	char *file_addr;
+	char *file_addr, *devnum;
 	struct fdt_header *blob;
 	int ret;
 	char overlay_file[] = "overlays/";
 
 	static char *fs_argv[5];
+
+	devnum = env_get("devnum");
+	if (!devnum) {
+		printf("Can't get devnum\n");
+		goto fail;
+	}
 
 	file_addr = env_get("fdt_overlay_addr");
 	if (!file_addr) {
@@ -588,7 +599,16 @@ static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, c
 
 	fs_argv[0] = "ext2load";
 	fs_argv[1] = "mmc";
-	fs_argv[2] = hw_conf->dev_part;
+
+	if (!strcmp(devnum, "0"))
+		fs_argv[2] = "0:7";
+	else if (!strcmp(devnum, "1"))
+		fs_argv[2] = "1:7";
+	else {
+		printf("Invalid devnum\n");
+		goto fail;
+	}
+
 	fs_argv[3] = file_addr;
 	fs_argv[4] = overlay_file;
 
@@ -625,7 +645,7 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 #ifdef CONFIG_OF_LIBFDT_OVERLAY
 	int i;
 	for (i = 0; i < hw_conf->overlay_count; i++) {
-		if (merge_dts_overlay(cmdtp, working_fdt, hw_conf->overlay_file[i], hw_conf) < 0)
+		if (merge_dts_overlay(cmdtp, working_fdt, hw_conf->overlay_file[i]) < 0)
 			printf("Can't merge dts overlay: %s\n", hw_conf->overlay_file[i]);
 		else
 			printf("Merged dts overlay: %s\n", hw_conf->overlay_file[i]);
@@ -814,9 +834,14 @@ int android_image_get_kernel(const struct andr_img_hdr *hdr, int verify,
 		len += strlen(hdr->cmdline);
 	}
 
+	char *rootmmc0 = "root=/dev/mmcblk0p8"; /* SDcard Boot */
+	char *rootmmc1 = "root=/dev/mmcblk1p8"; /* eMMC Boot */
+
 	char *bootargs = env_get("bootargs");
 	if (bootargs)
 		len += strlen(bootargs);
+
+	len += strlen(rootmmc0);
 
 	char *newbootargs = malloc(len + 2);
 	if (!newbootargs) {
@@ -831,6 +856,12 @@ int android_image_get_kernel(const struct andr_img_hdr *hdr, int verify,
 	}
 	if (*hdr->cmdline)
 		strcat(newbootargs, hdr->cmdline);
+
+	char *devnum = env_get("devnum");
+	if (!strcmp(devnum, "0"))
+		strcat(newbootargs, rootmmc1);
+	else if (!strcmp(devnum, "1"))
+		strcat(newbootargs, rootmmc0);
 
 	env_set("bootargs", newbootargs);
 
