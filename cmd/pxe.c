@@ -409,6 +409,7 @@ do_pxe_get(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 	}
 
 	printf("Config file not found\n");
+	run_command("ums 0 mmc 0", 0);
 
 	return 1;
 }
