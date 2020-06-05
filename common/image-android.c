@@ -35,7 +35,6 @@ DECLARE_GLOBAL_DATA_PTR;
 #define ANDROID_ROCKCHIP_LEGACY_PAGE_SIZE	0x4000
 
 #define MAX_OVERLAY_NAME_LENGTH 128
-#define MAX_OVERLAY_COUNT 20
 struct hw_config
 {
 	int valid;
@@ -52,7 +51,7 @@ struct hw_config
 	int gmac;
 
 	int overlay_count;
-	char *overlay_file[MAX_OVERLAY_COUNT];
+	char **overlay_file;
 };
 
 static unsigned long hw_skip_comment(char *text)
@@ -312,18 +311,42 @@ static int set_file_conf(char *text, struct hw_config *hw_conf, int start_point,
 
 	name_length = file_ptr - start_point;
 
-	if(name_length && name_length < MAX_OVERLAY_NAME_LENGTH && hw_conf->overlay_count < MAX_OVERLAY_COUNT) {
+	if(name_length && name_length < MAX_OVERLAY_NAME_LENGTH) {
 		ptr = (char*)calloc(MAX_OVERLAY_NAME_LENGTH, sizeof(char));
 		memcpy(ptr, text + start_point, name_length);
 		ptr[name_length] = 0x00;
 		hw_conf->overlay_file[hw_conf->overlay_count] = ptr;
 		hw_conf->overlay_count += 1;
-
-		//Pass a space for next string.
-		start_point = file_ptr + 1;
 	}
+	//Pass a space for next string.
+	start_point = file_ptr + 1;
 
 	return start_point;
+}
+
+void get_overlay_count(char *text, struct hw_config *hw_conf)
+{
+	int i = 0;
+	int start_point = 0;
+	int overlay_count = 0;
+	int name_length;
+
+	while(*(text + i) != 0x00)
+	{
+		if(*(text + i) == 0x20 || *(text + i) == 0x0a) {
+			name_length = i - start_point;
+			if(name_length && name_length < MAX_OVERLAY_NAME_LENGTH)
+				overlay_count += 1;
+		}
+
+		if(*(text + i) == 0x20)
+			start_point = i + 1;
+		else if(*(text + i) == 0x0a)
+			break;
+		i++;
+	}
+
+	hw_conf->overlay_file = (char**)calloc(overlay_count, sizeof(char*));
 }
 
 static unsigned long get_overlay(char *text, struct hw_config *hw_conf)
@@ -358,6 +381,7 @@ static unsigned long hw_parse_property(char *text, struct hw_config *hw_conf)
 		i = i + get_conf_value(text + i, hw_conf);
 	} else if(memcmp(text, "overlay=", 8) == 0) {
 		i = 8;
+		get_overlay_count(text + i, hw_conf);
 		i = i + get_overlay(text + i, hw_conf);
 	} else {
 		printf("[conf] hw_parse_property: illegal line\n");
@@ -779,6 +803,7 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 
 		free(hw_conf->overlay_file[i]);
 	}
+	free(hw_conf->overlay_file);
 #endif
 
 	if (hw_conf->i2c6 == 1)
