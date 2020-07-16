@@ -10,6 +10,8 @@
 #include <asm/io.h>
 #include <asm/arch/boot_mode.h>
 
+#define CONFIG_GRF_SOC_STATUS3_REG 0xff77e2ac
+
 DECLARE_GLOBAL_DATA_PTR;
 
 enum {
@@ -79,6 +81,7 @@ int rockchip_get_boot_mode(void)
 		{ -EINVAL, -EINVAL, -EINVAL };
 	static int bcb_offset = -EINVAL;	/* static */
 	uint32_t reg_boot_mode;
+	uint32_t reg_soc_status3;
 	char *env_reboot_mode;
 	int clear_boot_reg = 0;
 #ifdef CONFIG_ANDROID_BOOT_IMAGE
@@ -191,8 +194,15 @@ int rockchip_get_boot_mode(void)
 			boot_mode[PL] = BOOT_MODE_WATCHDOG;
 			break;
 		default:
-			printf("boot mode: None\n");
-			boot_mode[PL] = BOOT_MODE_UNDEFINE;
+			reg_soc_status3 = readl((void *)CONFIG_GRF_SOC_STATUS3_REG);
+			if (reg_soc_status3 & (1 << 12)) {
+				printf("usbcphy0_otg_utmi_bvalid = 1\n");
+				boot_mode[PH] = BOOT_MODE_UMS;
+				clear_boot_reg = 1;
+			} else {
+				printf("boot mode: None\n");
+				boot_mode[PL] = BOOT_MODE_UNDEFINE;
+			}
 		}
 	}
 
