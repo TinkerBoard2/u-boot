@@ -680,6 +680,44 @@ static int sleep_thread(struct fsg_common *common)
 	return rc;
 }
 
+static int sleep_thread_timeout(struct fsg_common *common)
+{
+	int rc = 0;
+	int i = 0, k = 0, j = 0;
+
+	/* Wait until a signal arrives or we are woken up */
+	for (;;) {
+		if (common->thread_wakeup_needed)
+			break;
+
+		if (++i == 20000) {
+			busy_indicator();
+			i = 0;
+			k++;
+		}
+
+		if (k == 10) {
+			/* Handle CTRL+C */
+			if (ctrlc())
+				return -EPIPE;
+
+			/* Check cable connection */
+			if (!g_dnl_board_usb_cable_connected())
+				return -EIO;
+
+			k = 0;
+			j++;
+		}
+
+		if (j == 30) //about 2 seconds
+			return -ETIMEDOUT;
+
+		usb_gadget_handle_interrupts(0);
+	}
+	common->thread_wakeup_needed = 0;
+	return rc;
+}
+
 /*-------------------------------------------------------------------------*/
 
 static int do_read(struct fsg_common *common)
@@ -2417,7 +2455,7 @@ int fsg_main_thread(void *common_)
 		}
 
 		if (!common->running) {
-			ret = sleep_thread(common);
+			ret = sleep_thread_timeout(common);
 			if (ret)
 				return ret;
 
