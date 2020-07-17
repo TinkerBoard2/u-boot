@@ -224,6 +224,10 @@ static int do_usb_mass_storage(cmd_tbl_t *cmdtp, int flag,
 			if (rc == -EPIPE)
 				printf("\rCTRL+C - Operation aborted\n");
 
+			/* Check usb connection timeout */
+			if (rc == -ETIMEDOUT)
+				printf("\rWaiting usb connection timeout, exit ums mode.\n");
+
 			rc = CMD_RET_SUCCESS;
 			goto cleanup_register;
 		}
