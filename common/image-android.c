@@ -83,7 +83,6 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 		i = 13;
 		if(memcmp(text + i, "on", 2) == 0) {
 			hw_conf->fiq_debugger = 1;
-			hw_conf->uart0 = -1;
 			i = i + 2;
 		} else if(memcmp(text + i, "off", 3) == 0) {
 			hw_conf->fiq_debugger = -1;
@@ -113,8 +112,7 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 	} else if(memcmp(text, "uart0=", 6) == 0) {
 		i = 6;
 		if(memcmp(text + i, "on", 2) == 0) {
-			if(hw_conf->fiq_debugger != 1)
-				hw_conf->uart0 = 1;
+			hw_conf->uart0 = 1;
 			i = i + 2;
 		} else if(memcmp(text + i, "off", 3) == 0) {
 			hw_conf->uart0 = -1;
@@ -1293,6 +1291,7 @@ static int android_image_separate(struct andr_img_hdr *hdr,
         printf("config.txt valid = %d\n", hw_conf.valid);
         if(hw_conf.valid == 1) {
                 printf("config on: 1, config off: -1, no config: 0\n");
+		printf("intf.fiq_debugger = %d\n", hw_conf.fiq_debugger);
                 printf("intf.i2c6 = %d\n", hw_conf.i2c6);
                 printf("intf.i2c7 = %d\n", hw_conf.i2c7);
                 printf("intf.uart0 = %d\n", hw_conf.uart0);
