@@ -86,8 +86,8 @@ int g_dnl_bind_fixup(struct usb_device_descriptor *dev, const char *name)
 #endif
 	} else if (!strncmp(name, "usb_dnl_fastboot", 16)) {
 		/* Fix to Google's VID and PID */
-		dev->idVendor  = __constant_cpu_to_le16(0x18d1);
-		dev->idProduct = __constant_cpu_to_le16(0xd00d);
+		dev->idVendor  = __constant_cpu_to_le16(0x0b05);
+		dev->idProduct = __constant_cpu_to_le16(0x7771);
 	} else if (!strncmp(name, "usb_dnl_dfu", 11)) {
 		/* Fix to Rockchip's VID and PID for DFU */
 		dev->idVendor  = cpu_to_le16(0x2207);
