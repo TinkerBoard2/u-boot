@@ -738,7 +738,7 @@ static int merge_dts_overlay(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, c
 	char *file_addr, *devnum;
 	struct fdt_header *blob;
 	int ret;
-	char overlay_file[] = "overlays/";
+	char overlay_file[MAX_OVERLAY_NAME_LENGTH] = "overlays/";
 
 	static char *fs_argv[5];
 
