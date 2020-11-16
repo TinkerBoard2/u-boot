@@ -342,6 +342,8 @@ void drm_rk_selete_output(struct hdmi_edid_data *edid_data,
 	else
 		*bus_format = MEDIA_BUS_FMT_YUV8_1X24;
 
+	*bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+
 	dev_desc = rockchip_get_bootdev();
 	if (!dev_desc) {
 		printf("%s: Could not find device\n", __func__);
