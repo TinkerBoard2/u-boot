@@ -190,7 +190,7 @@ int setup_boot_mode(void)
 		break;
 	case BOOT_MODE_UMS:
 		printf("enter UMS!\n");
-		env_set("preboot", "setenv preboot; ums 0 mmc 0");
+		env_set("preboot", "setenv preboot; ums 0 mmc 0; reboot");
 		break;
 	case BOOT_MODE_LOADER:
 		printf("enter Rockusb!\n");
