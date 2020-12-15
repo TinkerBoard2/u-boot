@@ -19,6 +19,9 @@
 #include "menu.h"
 #include "cli.h"
 
+#define GPIO1_SWPORTA_DDR_REG	0xff730004
+#define GPIO1_SWPORTA_DR_REG	0xff730000
+
 #define MAX_TFTP_PATH_LEN 127
 
 const char *pxe_default_paths[] = {
@@ -409,7 +412,15 @@ do_pxe_get(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 	}
 
 	printf("Config file not found\n");
-	run_command("ums 0 mmc 0", 0);
+	run_command("ums 0 mmc 0;", 0);
+	uint32_t reg_gpio1a_ddr = readl((void *)GPIO1_SWPORTA_DDR_REG);
+	uint32_t reg_gpio1a_dr = readl((void *)GPIO1_SWPORTA_DR_REG);
+
+	// Set GPIO1_A6 to direction output.
+	writel(reg_gpio1a_ddr | (1 << 6), GPIO1_SWPORTA_DDR_REG);
+
+	// Set GPIO1_A6 to High.
+	writel(reg_gpio1a_dr | (1 << 6), GPIO1_SWPORTA_DR_REG);
 
 	return 1;
 }
