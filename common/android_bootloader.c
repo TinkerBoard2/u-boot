@@ -1094,6 +1094,7 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	char slot_suffix[3] = {0};
 	const char *mode_cmdline = NULL;
 	char *boot_partname = ANDROID_PARTITION_BOOT;
+	char *devnum = env_get("devnum");
 
 	/*
 	 * 1. Load MISC partition and determine the boot mode
@@ -1193,16 +1194,22 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 			if (android_image_load_by_partname(dev_desc,
 							   boot_partname,
 							   &load_address)) {
-				printf("Android image load failed, reboot\n");
+				printf("Android image load failed\n");
 
-				uint32_t reg_gpio1a_ddr = readl((void *)GPIO1_SWPORTA_DDR_REG);
-				uint32_t reg_gpio1a_dr = readl((void *)GPIO1_SWPORTA_DR_REG);
+				if (!devnum)
+					printf("Can't get devnum\n");
+				else if (!strcmp(devnum, "1")) {
+					printf("reboot\n");
 
-				// Set GPIO1_A6 to direction output.
-				writel(reg_gpio1a_ddr | (1 << 6), GPIO1_SWPORTA_DDR_REG);
+					uint32_t reg_gpio1a_ddr = readl((void *)GPIO1_SWPORTA_DDR_REG);
+					uint32_t reg_gpio1a_dr = readl((void *)GPIO1_SWPORTA_DR_REG);
 
-				// Set GPIO1_A6 to High.
-				writel(reg_gpio1a_dr | (1 << 6), GPIO1_SWPORTA_DR_REG);
+					// Set GPIO1_A6 to direction output.
+					writel(reg_gpio1a_ddr | (1 << 6), GPIO1_SWPORTA_DDR_REG);
+
+					// Set GPIO1_A6 to High.
+					writel(reg_gpio1a_dr | (1 << 6), GPIO1_SWPORTA_DR_REG);
+				}
 
 				return -1;
 			}
@@ -1225,16 +1232,22 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	if (android_image_load_by_partname(dev_desc,
 					   boot_partname,
 					   &load_address)) {
-		printf("Android image load failed, reboot\n");
+		printf("Android image load failed\n");
 
-		uint32_t reg_gpio1a_ddr = readl((void *)GPIO1_SWPORTA_DDR_REG);
-		uint32_t reg_gpio1a_dr = readl((void *)GPIO1_SWPORTA_DR_REG);
+		if (!devnum)
+			printf("Can't get devnum\n");
+		else if (!strcmp(devnum, "1")) {
+			printf("reboot\n");
 
-		// Set GPIO1_A6 to direction output.
-		writel(reg_gpio1a_ddr | (1 << 6), GPIO1_SWPORTA_DDR_REG);
+			uint32_t reg_gpio1a_ddr = readl((void *)GPIO1_SWPORTA_DDR_REG);
+			uint32_t reg_gpio1a_dr = readl((void *)GPIO1_SWPORTA_DR_REG);
 
-		// Set GPIO1_A6 to High.
-		writel(reg_gpio1a_dr | (1 << 6), GPIO1_SWPORTA_DR_REG);
+			// Set GPIO1_A6 to direction output.
+			writel(reg_gpio1a_ddr | (1 << 6), GPIO1_SWPORTA_DDR_REG);
+
+			// Set GPIO1_A6 to High.
+			writel(reg_gpio1a_dr | (1 << 6), GPIO1_SWPORTA_DR_REG);
+		}
 
 		return -1;
 	}
