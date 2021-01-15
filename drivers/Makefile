@@ -57,8 +57,9 @@ obj-$(CONFIG_OMAP_USB_PHY) += usb/phy/
 obj-$(CONFIG_SPL_SATA_SUPPORT) += ata/ scsi/
 obj-$(CONFIG_SPL_USB_HOST_SUPPORT) += block/
 obj-$(CONFIG_SPL_MMC_SUPPORT) += block/
+obj-$(CONFIG_SPL_MTD_SUPPORT) += block/
 obj-$(CONFIG_SPL_FPGA_SUPPORT) += fpga/
-
+obj-$(CONFIG_SPL_RKNAND_SUPPORT) += rknand/
 endif
 endif
 
@@ -102,7 +103,6 @@ obj-$(CONFIG_U_QE) += qe/
 obj-y += mailbox/
 obj-y += memory/
 obj-y += pwm/
-obj-y += reset/
 obj-y += input/
 # SOC specific infrastructure drivers.
 obj-y += soc/
@@ -111,3 +111,6 @@ obj-y += thermal/
 
 obj-$(CONFIG_MACH_PIC32) += ddr/microchip/
 endif
+
+obj-$(CONFIG_$(SPL_TPL_)DM_RESET) += reset/
+

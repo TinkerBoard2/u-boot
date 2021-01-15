@@ -172,6 +172,7 @@ config SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR
 
 config SYS_MMCSD_RAW_MODE_U_BOOT_USE_PARTITION
 	bool "MMC Raw mode: by partition"
+	depends on SPL_LIBDISK_SUPPORT
 	help
 	  Use a partition for loading U-Boot when using MMC/SD in raw mode.
 
@@ -191,12 +192,25 @@ config SYS_MMCSD_RAW_MODE_U_BOOT_USE_PARTITION_TYPE
 	  raw mode. U-Boot will be loaded from the first partition of this
 	  type to be found.
 
+config SYS_MMCSD_RAW_MODE_U_BOOT_PARTITION_NAME
+	string "Partition Name on the MMC to load U-Boot from"
+	depends on SYS_MMCSD_RAW_MODE_U_BOOT_USE_PARTITION
+	default "uboot"
+	help
+          Partition Name on the MMC to load U-Boot from, when the MMC is being
+          used in raw mode.
+
 config SYS_MMCSD_RAW_MODE_U_BOOT_PARTITION_TYPE
 	hex "Partition Type on the MMC to load U-Boot from"
 	depends on SYS_MMCSD_RAW_MODE_U_BOOT_USE_PARTITION_TYPE
 	help
 	  Partition Type on the MMC to load U-Boot from, when the MMC is being
 	  used in raw mode.
+
+config SPL_MISC_SECTOR
+	hex "Sector address to load misc in SPL"
+	depends on !SPL_LIBDISK_SUPPORT && SPL_KERNEL_BOOT
+	default 0x8000
 
 config SPL_CRC32_SUPPORT
 	bool "Support CRC32"
@@ -451,6 +465,14 @@ config SPL_MTD_SUPPORT
 	  devices. See SPL_NAND_SUPPORT and SPL_ONENAND_SUPPORT for how
 	  to enable specific MTD drivers.
 
+config MTD_BLK_U_BOOT_OFFS
+	hex "Location in MTD block to read U-Boot from"
+	default 0x4000
+	depends on SPL_MTD_SUPPORT
+	help
+	  Set the offset from the start of the nand,spi nand and nor flash where
+	  u-boot should be loaded from.
+
 config SPL_MUSB_NEW_SUPPORT
 	bool "Support new Mentor Graphics USB"
 	help
@@ -636,6 +658,23 @@ config SPL_SPI_FLASH_SUPPORT
 	  lines). This enables the drivers in drivers/mtd/spi as part of an
 	  SPL build. This normally requires SPL_SPI_SUPPORT.
 
+config SPL_RKNAND_SUPPORT
+	bool "Rockchip NAND FLASH device support"
+	depends on BLK
+	select RKNAND
+	select ZFTL if (ROCKCHIP_PX30 || ROCKCHIP_RK3568)
+	help
+	  This option enables support for Rockchip NAND FLASH devices.
+	  It supports block interface(with rk ftl) to read and write NAND FLASH.
+
+config RKNAND_BLK_U_BOOT_OFFS
+	hex "Location in RKNAND block to read U-Boot from"
+	default 0x4000
+	depends on SPL_RKNAND_SUPPORT
+	help
+	  Set the offset from the start of the rknand device where
+	  u-boot should be loaded from.
+
 if SPL_SPI_FLASH_SUPPORT
 
 config SPL_SPI_FLASH_TINY
@@ -800,7 +839,7 @@ config SPL_OPTEE
 
 config SPL_AB
 	bool "Support AB system boot"
-	depends on SPL
+	depends on SPL && SPL_EFI_PARTITION
 	help
 	  Enable this config to support AB system boot.
 
@@ -827,6 +866,19 @@ config RKFW_BOOT_SECTOR
         depends on SPL_LOAD_RKFW
         default 0xa000
 
+config SPL_KERNEL_BOOT
+	bool "Enable boot kernel in SPL"
+	depends on SPL
+	help
+	  Enable boot kernel in SPL.
+
+config SPL_KERNEL_BOOT_SECTOR
+	hex "Sector address to load kernel in SPL"
+	depends on SPL_KERNEL_BOOT
+	depends on !SPL_LIBDISK_SUPPORT
+	default 0xa000
+
+if SPL_LOAD_RKFW
 config SPL_KERNEL_ADDR
 	hex "Kernel load address in spl"
 	depends on SPL
@@ -834,6 +886,21 @@ config SPL_KERNEL_ADDR
 	help
 	  Define the kernel address where load kernel image to.
 	  This is used to boot kernel in spl.
+
+config SPL_KERNEL_COMPRESS_ADDR
+	hex "The compressed kernel in spl"
+	depends on SPL && SPL_ROCKCHIP_HW_DECOMPRESS
+	help
+	  Load compressed kernel in this address, then call the
+	  decompress process to decompress the firmware.
+
+config SPL_KERNEL_DECOM_LIMIT_SIZE
+        hex "The decompress limit size"
+        depends on SPL && SPL_ROCKCHIP_HW_DECOMPRESS
+	default 0x1ff8000
+        help
+          Define kernel maximum decompressible size that prevent
+          memory overrun.
 
 config SPL_FDT_ADDR
 	hex "Device tree blob load address in spl"
@@ -851,11 +918,21 @@ config SPL_RAMDISK_ADDR
 	  Define the ramdisk address where load ramdisk image to.
 	  This is used to boot kernel in spl.
 
-config SPL_KERNEL_BOOT
-	bool "Enable boot kernel in SPL"
-	depends on SPL
+config SPL_RAMDISK_COMPRESS_ADDR
+	hex "The compressed ramdisk in spl"
+	depends on SPL && SPL_ROCKCHIP_HW_DECOMPRESS
 	help
-	  Enable boot kernel in SPL.
+	  Load compressed ramdisk in this address, then call the
+	  decompress process to decompress the firmware.
+
+config SPL_RAMDISK_DECOM_LIMIT_SIZE
+	hex "The decompress limit size"
+	depends on SPL && SPL_ROCKCHIP_HW_DECOMPRESS
+	default 0x3000000
+	help
+	  Define ramdisk maximum decompressible size that prevent
+	  memory overrun.
+endif
 
 config TPL
 	bool

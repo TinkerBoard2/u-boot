@@ -4,10 +4,12 @@
  */
 #include <common.h>
 #include <asm/io.h>
+#include <clk.h>
 #include <dm.h>
 #include <linux/bitops.h>
 #include <misc.h>
 #include <irq-generic.h>
+#include <reset.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -31,6 +33,8 @@ DECLARE_GLOBAL_DATA_PTR;
 #define DECOM_DICTID		0x44
 #define DECOM_CSL		0x48
 #define DECOM_CSH		0x4c
+#define DECOM_LMTSL             0x50
+#define DECOM_LMTSH             0x54
 
 #define LZ4_HEAD_CSUM_CHECK_EN	BIT(1)
 #define LZ4_BLOCK_CSUM_CHECK_EN	BIT(2)
@@ -62,6 +66,8 @@ DECLARE_GLOBAL_DATA_PTR;
 #define DECOM_GZIP_MODE		BIT(4)
 #define DECOM_ZLIB_MODE		BIT(5)
 #define DECOM_DEFLATE_MODE	BIT(0)
+#define DECOM_AXI_IDLE		BIT(4)
+#define DECOM_LZ4_MODE		0
 
 #define DECOM_ENABLE		0x1
 #define DECOM_DISABLE		0x0
@@ -75,50 +81,64 @@ DECLARE_GLOBAL_DATA_PTR;
 	DISEIEN | LENEIEN | LITEIEN | SQMEIEN | SLCIEN | \
 	HDEIEN | DSIEN)
 
-enum decom_mod {
-	LZ4_MOD,
-	GZIP_MOD,
-	ZLIB_MOD,
-};
-
-struct rockchip_decom_param {
-	unsigned long addr_src;
-	unsigned long addr_dst;
-	unsigned long size;
-	enum decom_mod mode;
-};
+#define DCLK_DECOM		400 * 1000 * 1000
 
 struct rockchip_decom_priv {
+	struct reset_ctl rst;
 	void __iomem *base;
+	bool idle_check_once;
 	bool done;
+	struct clk dclk;
+	int cached; /* 1: access the data through dcache; 0: no dcache */
 };
 
 static int rockchip_decom_start(struct udevice *dev, void *buf)
 {
 	struct rockchip_decom_priv *priv = dev_get_priv(dev);
-	struct rockchip_decom_param *param = (struct rockchip_decom_param *)buf;
+	struct decom_param *param = (struct decom_param *)buf;
+	unsigned int limit_lo = param->size_dst & 0xffffffff;
+	unsigned int limit_hi = param->size_dst >> 32;
+
+#if CONFIG_IS_ENABLED(DM_RESET)
+	reset_assert(&priv->rst);
+	udelay(10);
+	reset_deassert(&priv->rst);
+#endif
+	/*
+	 * Purpose:
+	 *    src: clean dcache to get the real compressed data from ddr.
+	 *    dst: invalidate dcache.
+	 *
+	 * flush_dcache_all() operating on set/way is faster than
+	 * flush_cache() and invalidate_dcache_range() operating
+	 * on virtual address.
+	 */
+	if (!priv->cached)
+		flush_dcache_all();
 
 	priv->done = false;
 
-	if (param->mode == LZ4_MOD)
+	if (param->mode == DECOM_LZ4)
 		writel(LZ4_CONT_CSUM_CHECK_EN |
 		       LZ4_HEAD_CSUM_CHECK_EN |
 		       LZ4_BLOCK_CSUM_CHECK_EN |
-		       LZ4_MOD, priv->base + DECOM_CTRL);
-
-	if (param->mode == GZIP_MOD)
+		       DECOM_LZ4_MODE,
+		       priv->base + DECOM_CTRL);
+	else if (param->mode == DECOM_GZIP)
 		writel(DECOM_DEFLATE_MODE | DECOM_GZIP_MODE,
 		       priv->base + DECOM_CTRL);
-
-	if (param->mode == ZLIB_MOD)
+	else if (param->mode == DECOM_ZLIB)
 		writel(DECOM_DEFLATE_MODE | DECOM_ZLIB_MODE,
 		       priv->base + DECOM_CTRL);
 
 	writel(param->addr_src, priv->base + DECOM_RADDR);
 	writel(param->addr_dst, priv->base + DECOM_WADDR);
 
-	writel(DECOM_INT_MASK, priv->base + DECOM_IEN);
+	writel(limit_lo, priv->base + DECOM_LMTSL);
+	writel(limit_hi, priv->base + DECOM_LMTSH);
 	writel(DECOM_ENABLE, priv->base + DECOM_ENR);
+
+	priv->idle_check_once = true;
 
 	return 0;
 }
@@ -126,12 +146,6 @@ static int rockchip_decom_start(struct udevice *dev, void *buf)
 static int rockchip_decom_stop(struct udevice *dev)
 {
 	struct rockchip_decom_priv *priv = dev_get_priv(dev);
-	int irq_status;
-
-	irq_status = readl(priv->base + DECOM_ISR);
-	/* clear interrupts */
-	if (irq_status)
-		writel(irq_status, priv->base + DECOM_ISR);
 
 	writel(DECOM_DISABLE, priv->base + DECOM_ENR);
 
@@ -142,16 +156,37 @@ static int rockchip_decom_stop(struct udevice *dev)
 static int rockchip_decom_done_poll(struct udevice *dev)
 {
 	struct rockchip_decom_priv *priv = dev_get_priv(dev);
-	int decom_status;
 
-	decom_status = readl(priv->base + DECOM_STAT);
-	if (decom_status & DECOM_COMPLETE)
-		return 0;
+	/*
+	 * Test the decom is idle first time.
+	 */
+	if (!priv->idle_check_once)
+		return !(readl(priv->base + DECOM_AXI_STAT) & DECOM_AXI_IDLE);
 
-	return -EINVAL;
+	return !(readl(priv->base + DECOM_STAT) & DECOM_COMPLETE);
 }
 
-/* Caller must fill in param @buf which represent struct rockchip_decom_param */
+static int rockchip_decom_capability(u32 *buf)
+{
+	*buf = DECOM_GZIP;
+
+	return 0;
+}
+
+static int rockchip_decom_data_size(struct udevice *dev, u64 *buf)
+{
+	struct rockchip_decom_priv *priv = dev_get_priv(dev);
+	struct decom_param *param = (struct decom_param *)buf;
+	u32 sizel, sizeh;
+
+	sizel = readl(priv->base + DECOM_TSIZEL);
+	sizeh = readl(priv->base + DECOM_TSIZEH);
+	param->size_dst = sizel | ((u64)sizeh << 32);
+
+	return 0;
+}
+
+/* Caller must fill in param @buf which represent struct decom_param */
 static int rockchip_decom_ioctl(struct udevice *dev, unsigned long request,
 				void *buf)
 {
@@ -166,6 +201,15 @@ static int rockchip_decom_ioctl(struct udevice *dev, unsigned long request,
 		break;
 	case IOCTL_REQ_STOP:
 		ret = rockchip_decom_stop(dev);
+		break;
+	case IOCTL_REQ_CAPABILITY:
+		ret = rockchip_decom_capability(buf);
+		break;
+	case IOCTL_REQ_DATA_SIZE:
+		ret = rockchip_decom_data_size(dev, buf);
+		break;
+	default:
+		printf("Unsupported ioctl: %ld\n", (ulong)request);
 		break;
 	}
 
@@ -184,43 +228,32 @@ static int rockchip_decom_ofdata_to_platdata(struct udevice *dev)
 	if (!priv->base)
 		return -ENOENT;
 
+	priv->cached = dev_read_u32_default(dev, "data-cached", 0);
+
 	return 0;
 }
 
-#ifndef CONFIG_SPL_BUILD
-static void rockchip_decom_irqhandler(int irq, void *data)
-{
-	struct udevice *dev = data;
-	struct rockchip_decom_priv *priv = dev_get_priv(dev);
-	int irq_status;
-	int decom_status;
-
-	irq_status = readl(priv->base + DECOM_ISR);
-	/* clear interrupts */
-	writel(irq_status, priv->base + DECOM_ISR);
-	if (irq_status & DECOM_STOP) {
-		decom_status = readl(priv->base + DECOM_STAT);
-		if (decom_status & DECOM_COMPLETE) {
-			priv->done = true;
-			/*
-			 * TODO:
-			 * Inform someone that decompress completed
-			 */
-			printf("decom completed\n");
-		} else {
-			printf("decom failed, irq_status = 0x%x, decom_status = 0x%x\n",
-			       irq_status, decom_status);
-		}
-	}
-}
-#endif
-
 static int rockchip_decom_probe(struct udevice *dev)
 {
-#ifndef CONFIG_SPL_BUILD
-	irq_install_handler(DECOM_IRQ, rockchip_decom_irqhandler, dev);
-	irq_handler_enable(DECOM_IRQ);
+#if CONFIG_IS_ENABLED(DM_RESET)
+	struct rockchip_decom_priv *priv = dev_get_priv(dev);
+	int ret;
+
+	ret = reset_get_by_name(dev, "dresetn", &priv->rst);
+	if (ret) {
+		debug("reset_get_by_name() failed: %d\n", ret);
+		return ret;
+	}
 #endif
+
+	ret = clk_get_by_name(dev, "dclk", &priv->dclk);
+	if (ret < 0)
+		return ret;
+
+	ret = clk_set_rate(&priv->dclk, DCLK_DECOM);
+	if (ret < 0)
+		return ret;
+
 	return 0;
 }
 

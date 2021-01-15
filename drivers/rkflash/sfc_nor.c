@@ -19,19 +19,29 @@ static struct flash_info spi_flash_tbl[] = {
 	/* GD25Q127C and GD25Q128C*/
 	{ 0xc84018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 15, 9, 0 },
 	/* GD25Q256B/C/D */
-	{ 0xc84019, 128, 8, 0x13, 0x12, 0x6C, 0x3E, 0x21, 0xDC, 0x3C, 16, 6, 0 },
+	{ 0xc84019, 128, 8, 0x13, 0x12, 0x6C, 0x3E, 0x21, 0xDC, 0x1C, 16, 6, 0 },
 	/* GD25Q512MC */
 	{ 0xc84020, 128, 8, 0x13, 0x12, 0x6C, 0x3E, 0x21, 0xDC, 0x3C, 17, 6, 0 },
-	/* 25Q64JVSSIQ */
+	/* GD25B512MEYIG */
+	{ 0xc8471A, 128, 8, 0x13, 0x12, 0x6C, 0x3E, 0x21, 0xDC, 0x3C, 17, 0, 0 },
+
+	/* W25Q64JVSSIQ */
 	{ 0xef4017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 9, 0 },
-	/* 25Q128FV and 25Q128JV*/
+	/* W25Q128FV and W25Q128JV*/
 	{ 0xef4018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 15, 9, 0 },
-	/* 25Q256F/J */
+	/* W25Q256F/J */
 	{ 0xef4019, 128, 8, 0x13, 0x02, 0x6C, 0x32, 0x20, 0xD8, 0x3C, 16, 9, 0 },
-	/* 25Q256JWEQ*/
+	/* W25Q256JWEQ*/
 	{ 0xef6019, 128, 8, 0x13, 0x02, 0x6C, 0x32, 0x20, 0xD8, 0x3C, 16, 9, 0 },
-	/* 25Q64FWSSIG */
+	/* W25Q64FWSSIG */
 	{ 0xef6017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 9, 0 },
+	/* W25Q128JVSIM */
+	{ 0xef7018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 15, 9, 0 },
+	/* W25Q256JVEM */
+	{ 0xef7019, 128, 8, 0x13, 0x12, 0x6C, 0x34, 0x21, 0xDC, 0x3C, 16, 9, 0 },
+
+	/* MX25L3233FM2I-08G */
+	{ 0xc22016, 128, 8, 0x03, 0x02, 0x6B, 0x38, 0x20, 0xD8, 0x0E, 13, 6, 0 },
 	/* MX25L6433F */
 	{ 0xc22017, 128, 8, 0x03, 0x02, 0x6B, 0x38, 0x20, 0xD8, 0x0E, 14, 6, 0 },
 	/* MX25L12835E/F MX25L12833FMI-10G */
@@ -40,6 +50,9 @@ static struct flash_info spi_flash_tbl[] = {
 	{ 0xc22019, 128, 8, 0x13, 0x12, 0x6C, 0x38, 0x21, 0xDC, 0x3E, 16, 6, 0 },
 	/* MX25L51245GMI */
 	{ 0xc2201a, 128, 8, 0x13, 0x12, 0x6C, 0x38, 0x21, 0xDC, 0x3E, 17, 6, 0 },
+	/* MX25U51245G */
+	{ 0xc2253a, 128, 8, 0x13, 0x12, 0x6C, 0x3E, 0x21, 0xDC, 0x1E, 17, 6, 0 },
+
 	/* XM25QH32C */
 	{ 0x204016, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 13, 9, 0 },
 	/* XM25QH64B */
@@ -50,12 +63,14 @@ static struct flash_info spi_flash_tbl[] = {
 	{ 0x206019, 128, 8, 0x13, 0x12, 0x6C, 0x3E, 0x21, 0xDC, 0x1D, 16, 6, 0 },
 	/* XM25QH64A */
 	{ 0x207017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 0, 0 },
+
 	/* XT25F128A XM25QH128A */
-	{ 0x207018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x00, 15, 0, 0 },
+	{ 0x207018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 15, 0, 0 },
 	/* XT25F64BSSIGU-5 */
 	{ 0x0b4017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0D, 14, 9, 0 },
 	/* XT25F128BSSIGU */
 	{ 0x0b4018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0D, 15, 9, 0 },
+
 	/* EN25QH64A */
 	{ 0x1c7017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 0, 0 },
 	/* EN25QH128A */
@@ -66,22 +81,30 @@ static struct flash_info spi_flash_tbl[] = {
 	{ 0x1c3816, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 13, 0, 0 },
 	/* EN25S64A */
 	{ 0x1c3817, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 0, 0 },
-	/* P25Q64H */
-	{ 0x856017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 9, 0 },
 	/* EN25QH256A */
 	{ 0x1c7019, 128, 8, 0x13, 0x12, 0x6C, 0x34, 0x21, 0xDC, 0x3C, 16, 0, 0 },
-	/* FM25Q64A */
-	{ 0xf83217, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0D, 14, 9, 0 },
+
 	/* ZB25VQ64 */
 	{ 0x5e4017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 9, 0 },
 	/* ZB25VQ128 */
 	{ 0x5e4018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 15, 9, 0 },
-	/* 25Q256JVEM */
-	{ 0xef7019, 128, 8, 0x13, 0x12, 0x6C, 0x34, 0x21, 0xDC, 0x3C, 16, 9, 0 },
+	/* ZB25LQ128 */
+	{ 0x5e5018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 15, 9, 0 },
+
 	/* BH25Q128AS */
 	{ 0x684018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x04, 15, 9, 0 },
 	/* BH25Q64BS */
 	{ 0x684017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x04, 14, 9, 0 },
+
+	/* FM25Q128A */
+	{ 0xA14018, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 15, 9, 0 },
+	/* FM25Q64-SOB-T-G */
+	{ 0xA14017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 9, 0 },
+
+	/* FM25Q64A */
+	{ 0xf83217, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0D, 14, 9, 0 },
+	/* P25Q64H */
+	{ 0x856017, 128, 8, 0x03, 0x02, 0x6B, 0x32, 0x20, 0xD8, 0x0C, 14, 9, 0 },
 };
 
 static int snor_write_en(void)
@@ -315,7 +338,7 @@ int snor_prog_page(struct SFNOR_DEV *p_dev,
 	op.sfctrl.d32 = 0;
 	op.sfctrl.b.datalines = p_dev->prog_lines;
 	op.sfctrl.b.enbledma = 1;
-	if (p_dev->prog_cmd == CMD_PAGE_PROG_A4)
+	if (p_dev->prog_lines == DATA_LINES_X4)
 		op.sfctrl.b.addrlines = SFC_4BITS_LINE;
 
 	if (p_dev->addr_mode == ADDR_MODE_4BYTE)
@@ -578,29 +601,15 @@ static void *snor_flash_info_adjust(struct flash_info *spi_flash_info)
 	return 0;
 }
 
-int snor_init(struct SFNOR_DEV *p_dev)
+static int snor_parse_flash_table(struct SFNOR_DEV *p_dev,
+				  struct flash_info *g_spi_flash_info)
 {
-	struct flash_info *g_spi_flash_info;
-	u32 i, ret;
-	u8 id_byte[5];
+	int i, ret;
 
-	if (!p_dev)
-		return SFC_PARAM_ERR;
-
-	memset((void *)p_dev, 0, sizeof(struct SFNOR_DEV));
-	p_dev->max_iosize = sfc_get_max_iosize();
-	snor_read_id(id_byte);
-	rkflash_print_error("sfc nor id: %x %x %x\n",
-			    id_byte[0], id_byte[1], id_byte[2]);
-	if (0xFF == id_byte[0] || 0x00 == id_byte[0])
-		return SFC_ERROR;
-
-	p_dev->manufacturer = id_byte[0];
-	p_dev->mem_type = id_byte[1];
-
-	g_spi_flash_info = snor_get_flash_info(id_byte);
 	if (g_spi_flash_info) {
 		snor_flash_info_adjust(g_spi_flash_info);
+		p_dev->manufacturer = (g_spi_flash_info->id >> 16) & 0xFF;
+		p_dev->mem_type = (g_spi_flash_info->id >> 8) & 0xFF;
 		p_dev->capacity = 1 << g_spi_flash_info->density;
 		p_dev->blk_size = g_spi_flash_info->block_size;
 		p_dev->page_size = NOR_SECS_PAGE;
@@ -620,6 +629,7 @@ int snor_init(struct SFNOR_DEV *p_dev)
 			p_dev->write_status = snor_write_status1;
 		else if (i == 2)
 			p_dev->write_status = snor_write_status2;
+
 		if (g_spi_flash_info->feature & FEA_4BIT_READ) {
 			ret = SFC_OK;
 			if (g_spi_flash_info->QE_bits)
@@ -640,7 +650,34 @@ int snor_init(struct SFNOR_DEV *p_dev)
 
 		if ((g_spi_flash_info->feature & FEA_4BYTE_ADDR_MODE))
 			snor_enter_4byte_mode();
+	}
+
+	return SFC_OK;
+}
+
+int snor_init(struct SFNOR_DEV *p_dev)
+{
+	struct flash_info *g_spi_flash_info;
+	u8 id_byte[5];
+
+	if (!p_dev)
+		return SFC_PARAM_ERR;
+
+	memset((void *)p_dev, 0, sizeof(struct SFNOR_DEV));
+	p_dev->max_iosize = sfc_get_max_iosize();
+
+	snor_read_id(id_byte);
+	rkflash_print_error("sfc nor id: %x %x %x\n",
+			    id_byte[0], id_byte[1], id_byte[2]);
+	if (0xFF == id_byte[0] || 0x00 == id_byte[0])
+		return SFC_ERROR;
+
+	g_spi_flash_info = snor_get_flash_info(id_byte);
+	if (g_spi_flash_info) {
+		snor_parse_flash_table(p_dev, g_spi_flash_info);
 	} else {
+		p_dev->manufacturer = id_byte[0];
+		p_dev->mem_type = id_byte[1];
 		p_dev->capacity = 1 << (id_byte[2] - 9);
 		p_dev->QE_bits = 0;
 		p_dev->blk_size = NOR_SECS_BLK;
@@ -652,6 +689,7 @@ int snor_init(struct SFNOR_DEV *p_dev)
 		p_dev->prog_lines = DATA_LINES_X1;
 		p_dev->read_lines = DATA_LINES_X1;
 		p_dev->write_status = snor_write_status;
+		snor_reset_device();
 	}
 
 	rkflash_print_info("addr_mode: %x\n", p_dev->addr_mode);
@@ -661,7 +699,42 @@ int snor_init(struct SFNOR_DEV *p_dev)
 	rkflash_print_info("prog_cmd: %x\n", p_dev->prog_cmd);
 	rkflash_print_info("blk_erase_cmd: %x\n", p_dev->blk_erase_cmd);
 	rkflash_print_info("sec_erase_cmd: %x\n", p_dev->sec_erase_cmd);
+	rkflash_print_info("capacity: %x\n", p_dev->capacity);
 
 	return SFC_OK;
+}
+
+int snor_reinit_from_table_packet(struct SFNOR_DEV *p_dev,
+				  struct snor_info_packet *packet)
+{
+	struct flash_info g_spi_flash_info;
+	u8 id_byte[5];
+	int ret;
+
+	if (!p_dev || packet->id != SNOR_INFO_PACKET_ID)
+		return SFC_PARAM_ERR;
+
+	snor_read_id(id_byte);
+	if (0xFF == id_byte[0] || 0x00 == id_byte[0])
+		return SFC_ERROR;
+
+	g_spi_flash_info.id = id_byte[0] << 16 | id_byte[1] << 8 | id_byte[2];
+	g_spi_flash_info.block_size = NOR_SECS_BLK;
+	g_spi_flash_info.sector_size = NOR_SECS_PAGE;
+	g_spi_flash_info.read_cmd = packet->read_cmd;
+	g_spi_flash_info.prog_cmd = packet->prog_cmd;
+	g_spi_flash_info.read_cmd_4 = packet->read_cmd_4;
+	g_spi_flash_info.prog_cmd_4 = packet->prog_cmd_4;
+	if (id_byte[2] >=  0x19)
+		g_spi_flash_info.read_cmd_4 = CMD_FAST_4READ_X4;
+	g_spi_flash_info.sector_erase_cmd = packet->sector_erase_cmd;
+	g_spi_flash_info.block_erase_cmd = packet->block_erase_cmd;
+	g_spi_flash_info.feature = packet->feature;
+	g_spi_flash_info.density = id_byte[2] - 9;
+	g_spi_flash_info.QE_bits = packet->QE_bits;
+
+	ret = snor_parse_flash_table(p_dev, &g_spi_flash_info);
+
+	return ret;
 }
 

@@ -22,6 +22,7 @@
 #include <memblk.h>
 #include <misc.h>
 #include <of_live.h>
+#include <mtd_blk.h>
 #include <ram.h>
 #include <rockchip_debugger.h>
 #include <syscon.h>
@@ -34,6 +35,8 @@
 #include <power/charge_display.h>
 #include <power/regulator.h>
 #include <optee_include/OpteeClientInterface.h>
+#include <optee_include/OpteeClientApiLib.h>
+#include <optee_include/tee_api_defines.h>
 #include <asm/arch/boot_mode.h>
 #include <asm/arch/clock.h>
 #include <asm/arch/cpu.h>
@@ -80,19 +83,42 @@ __weak int rk_board_init(void)
 #define CPUID_LEN	0x10
 #define CPUID_OFF	0x07
 
+#define MAX_ETHERNET	0x2
+
 static int rockchip_set_ethaddr(void)
 {
 #ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
-	char buf[ARP_HLEN_ASCII + 1];
-	u8 ethaddr[ARP_HLEN];
-	int ret;
+	char buf[ARP_HLEN_ASCII + 1], mac[16];
+	u8 ethaddr[ARP_HLEN * MAX_ETHERNET] = {0};
+	int ret, i;
+	bool need_write = false;
 
 	ret = vendor_storage_read(VENDOR_LAN_MAC_ID, ethaddr, sizeof(ethaddr));
-	if (ret > 0 && is_valid_ethaddr(ethaddr)) {
-		sprintf(buf, "%pM", ethaddr);
-		env_set("ethaddr", buf);
+	for (i = 0; i < MAX_ETHERNET; i++) {
+		if (ret <= 0 || !is_valid_ethaddr(&ethaddr[i * ARP_HLEN])) {
+			net_random_ethaddr(&ethaddr[i * ARP_HLEN]);
+			need_write = true;
+		}
+
+		if (is_valid_ethaddr(&ethaddr[i * ARP_HLEN])) {
+			sprintf(buf, "%pM", &ethaddr[i * ARP_HLEN]);
+			if (i == 0)
+				memcpy(mac, "ethaddr", sizeof("ethaddr"));
+			else
+				sprintf(mac, "eth%daddr", i);
+			env_set(mac, buf);
+		}
+	}
+
+	if (need_write) {
+		ret = vendor_storage_write(VENDOR_LAN_MAC_ID,
+					   ethaddr, sizeof(ethaddr));
+		if (ret < 0)
+			printf("%s: vendor_storage_write failed %d\n",
+			       __func__, ret);
 	}
 #endif
+
 	return 0;
 }
 
@@ -110,25 +136,40 @@ static int rockchip_set_serialno(void)
 #ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
 	ret = vendor_storage_read(VENDOR_SN_ID, serialno_str, (VENDOR_SN_MAX-1));
 	if (ret > 0) {
+		i = strlen(serialno_str);
+		for (; i > 0; i--) {
+			if ((serialno_str[i] >= 'a' && serialno_str[i] <= 'z') ||
+			    (serialno_str[i] >= 'A' && serialno_str[i] <= 'Z') ||
+			    (serialno_str[i] >= '0' && serialno_str[i] <= '9'))
+				break;
+		}
+
+		serialno_str[i + 1] = 0x0;
 		env_set("serial#", serialno_str);
 	} else {
 #endif
-#ifdef CONFIG_ROCKCHIP_EFUSE
+#if defined(CONFIG_ROCKCHIP_EFUSE) || defined(CONFIG_ROCKCHIP_OTP)
 		struct udevice *dev;
 
 		/* retrieve the device */
-		ret = uclass_get_device_by_driver(UCLASS_MISC,
-						  DM_GET_DRIVER(rockchip_efuse),
-						  &dev);
+		if (IS_ENABLED(CONFIG_ROCKCHIP_EFUSE))
+			ret = uclass_get_device_by_driver(UCLASS_MISC,
+							  DM_GET_DRIVER(rockchip_efuse),
+							  &dev);
+		else
+			ret = uclass_get_device_by_driver(UCLASS_MISC,
+							  DM_GET_DRIVER(rockchip_otp),
+							  &dev);
+
 		if (ret) {
-			printf("%s: could not find efuse device\n", __func__);
+			printf("%s: could not find efuse/otp device\n", __func__);
 			return ret;
 		}
 
 		/* read the cpu_id range from the efuses */
 		ret = misc_read(dev, CPUID_OFF, &cpuid, sizeof(cpuid));
 		if (ret) {
-			printf("%s: read cpuid from efuses failed, ret=%d\n",
+			printf("%s: read cpuid from efuse/otp failed, ret=%d\n",
 			       __func__, ret);
 			return ret;
 		}
@@ -229,12 +270,30 @@ static void env_fixup(void)
 		}
 	}
 #endif
-	/* If bl32 is disabled, maybe kernel can be load to lower address. */
+	/* If BL32 is disabled, move kernel to lower address. */
 	if (!(gd->flags & GD_FLG_BL32_ENABLED)) {
 		addr_r = env_get("kernel_addr_no_bl32_r");
 		if (addr_r)
 			env_set("kernel_addr_r", addr_r);
-	/* If bl32 is enlarged, we move ramdisk addr right behind it */
+
+		/*
+		 * 0x0a200000 and 0x08400000 are rockchip traditional address
+		 * of BL32 and ramdisk:
+		 *
+		 * |------------|------------|
+		 * |    BL32    |  ramdisk   |
+		 * |------------|------------|
+		 *
+		 * Move ramdisk to BL32 address to fix sysmem alloc failed
+		 * issue on the board with critical memory(ie. 256MB).
+		 */
+		if (gd->ram_size > SZ_128M && gd->ram_size <= SZ_256M) {
+			u_addr_r = env_get_ulong("ramdisk_addr_r", 16, 0);
+			if (u_addr_r == 0x0a200000)
+				env_set("ramdisk_addr_r", "0x08400000");
+		}
+
+	/* If BL32 is enlarged, move ramdisk right behind it */
 	} else {
 		mem = param_parse_optee_mem();
 		end = mem.base + mem.size;
@@ -305,8 +364,9 @@ static void early_download(void)
 
 static void board_debug_init(void)
 {
-	if (!gd->serial.using_pre_serial)
-		board_debug_uart_init();
+	if (!gd->serial.using_pre_serial &&
+	    !(gd->flags & GD_FLG_DISABLE_CONSOLE))
+		debug_uart_init();
 
 	if (tstc()) {
 		gd->console_evt = getc();
@@ -315,8 +375,19 @@ static void board_debug_init(void)
 	}
 
 	if (IS_ENABLED(CONFIG_CONSOLE_DISABLE_CLI))
-		printf("CLI: off\n");
+		printf("Cmd interface: disabled\n");
 }
+
+#ifdef CONFIG_MTD_BLK
+static void board_mtd_blk_map_partitions(void)
+{
+	struct blk_desc *dev_desc;
+
+	dev_desc = rockchip_get_bootdev();
+	if (dev_desc)
+		mtd_blk_map_partitions(dev_desc);
+}
+#endif
 
 int board_init(void)
 {
@@ -327,6 +398,9 @@ int board_init(void)
 #endif
 
 #ifdef CONFIG_USING_KERNEL_DTB
+#ifdef CONFIG_MTD_BLK
+	board_mtd_blk_map_partitions();
+#endif
 	init_kernel_dtb();
 #endif
 	early_download();
@@ -373,41 +447,38 @@ int board_fdt_fixup(void *blob)
 	return rk_board_fdt_fixup(blob);
 }
 
-#ifdef CONFIG_ARM64_BOOT_AARCH32
+#if defined(CONFIG_ARM64_BOOT_AARCH32) || !defined(CONFIG_ARM64)
 /*
- * Fixup MMU region attr for OP-TEE on ARMv8 CPU:
+ * Common for OP-TEE:
+ *	64-bit & 32-bit mode: share memory dcache is always enabled;
  *
- * What ever U-Boot is 64-bit or 32-bit mode, the OP-TEE is always 64-bit mode.
- *
- * Command for OP-TEE:
- *	64-bit mode: dcache is always enabled;
- *	32-bit mode: dcache is always disabled(Due to some unknown issue);
- *
- * Command for U-Boot:
+ * Common for U-Boot:
  *	64-bit mode: MMU table is static defined in rkxxx.c file, all memory
  *		     regions are mapped. That's good to match OP-TEE MMU policy.
  *
  *	32-bit mode: MMU table is setup according to gd->bd->bi_dram[..] where
  *		     the OP-TEE region has been reserved, so it can not be
- *		     mapped(i.e. dcache is disabled). That's also good to match
+ *		     mapped(i.e. dcache is disabled). That's *NOT* good to match
  *		     OP-TEE MMU policy.
  *
  * For the data coherence when communication between U-Boot and OP-TEE, U-Boot
  * should follow OP-TEE MMU policy.
  *
- * Here is the special:
- *	When CONFIG_ARM64_BOOT_AARCH32 is enabled, U-Boot is 32-bit mode while
- *	OP-TEE is still 64-bit mode. U-Boot would not map MMU table for OP-TEE
- *	region(but OP-TEE requires it cacheable) so we fixup here.
+ * So 32-bit mode U-Boot should map OP-TEE share memory as dcache enabled.
  */
 int board_initr_caches_fixup(void)
 {
+#ifdef CONFIG_OPTEE_CLIENT
 	struct memblock mem;
 
-	mem = param_parse_optee_mem();
+	mem.base = 0;
+	mem.size = 0;
+
+	optee_get_shm_config(&mem.base, &mem.size);
 	if (mem.size)
 		mmu_set_region_dcache_behaviour(mem.base, mem.size,
 						DCACHE_WRITEBACK);
+#endif
 	return 0;
 }
 #endif
@@ -416,22 +487,6 @@ void arch_preboot_os(uint32_t bootm_state)
 {
 	if (bootm_state & BOOTM_STATE_OS_PREP)
 		hotkey_run(HK_CLI_OS_PRE);
-}
-
-void board_quiesce_devices(void *images)
-{
-	hotkey_run(HK_CMDLINE);
-	hotkey_run(HK_CLI_OS_GO);
-
-#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
-	/* Destroy atags makes next warm boot safer */
-	atags_destroy();
-#endif
-
-#ifdef CONFIG_FIT_ROLLBACK_PROTECT
-	/* TODO */
-	printf("fit: rollback protect not implement\n");
-#endif
 }
 
 void enable_caches(void)
@@ -529,27 +584,43 @@ void cpu_secondary_init_r(void)
 }
 #endif
 
+int board_init_f_boot_flags(void)
+{
+	int boot_flags = 0;
+
+	/* pre-loader serial */
 #if defined(CONFIG_ROCKCHIP_PRELOADER_SERIAL) && \
     defined(CONFIG_ROCKCHIP_PRELOADER_ATAGS)
-int board_init_f_init_serial(void)
-{
-	struct tag *t = atags_get_tag(ATAG_SERIAL);
+	struct tag *t;
 
+	t = atags_get_tag(ATAG_SERIAL);
 	if (t) {
-		gd->serial.using_pre_serial = t->u.serial.enable;
-		gd->serial.addr = t->u.serial.addr;
+		gd->serial.using_pre_serial = 1;
+		gd->serial.enable = t->u.serial.enable;
 		gd->serial.baudrate = t->u.serial.baudrate;
+		gd->serial.addr = t->u.serial.addr;
 		gd->serial.id = t->u.serial.id;
-
-		debug("%s: enable=%d, addr=0x%lx, baudrate=%d, id=%d\n",
-		      __func__, gd->serial.using_pre_serial,
-		      gd->serial.addr, gd->serial.baudrate,
-		      gd->serial.id);
+		gd->baudrate = CONFIG_BAUDRATE;
+		if (!t->u.serial.enable)
+			boot_flags |= GD_FLG_DISABLE_CONSOLE;
+		debug("preloader: enable=%d, addr=0x%lx, baudrate=%d, id=%d\n",
+		      gd->serial.enable, gd->serial.addr,
+		      gd->serial.baudrate, gd->serial.id);
+	} else
+#endif
+	{
+		gd->baudrate = CONFIG_BAUDRATE;
+		gd->serial.baudrate = CONFIG_BAUDRATE;
+		gd->serial.addr = CONFIG_DEBUG_UART_BASE;
 	}
 
-	return 0;
-}
+	/* The highest priority to turn off (override) console */
+#if defined(CONFIG_DISABLE_CONSOLE)
+	boot_flags |= GD_FLG_DISABLE_CONSOLE;
 #endif
+
+	return boot_flags;
+}
 
 #if defined(CONFIG_USB_GADGET) && defined(CONFIG_USB_GADGET_DWC2_OTG)
 #include <fdt_support.h>
@@ -774,5 +845,67 @@ void autoboot_command_fail_handle(void)
 	run_command("rockusb 0 ${devtype} ${devnum}", 0);
 	run_command("fastboot usb 0;", 0);
 #endif
+#endif
+}
+
+#ifdef CONFIG_FIT_ROLLBACK_PROTECT
+
+#define FIT_ROLLBACK_INDEX_LOCATION	0x66697472	/* "fitr" */
+
+int fit_read_otp_rollback_index(uint32_t fit_index, uint32_t *otp_index)
+{
+#ifdef CONFIG_OPTEE_CLIENT
+	u64 index;
+	int ret;
+
+	ret = trusty_read_rollback_index(FIT_ROLLBACK_INDEX_LOCATION, &index);
+	if (ret) {
+		if (ret != TEE_ERROR_ITEM_NOT_FOUND)
+			return ret;
+
+		*otp_index = fit_index;
+		printf("Initial otp index as %d\n", fit_index);
+	}
+
+	*otp_index = index;
+#else
+	*otp_index = 0;
+#endif
+
+	return 0;
+}
+
+static int fit_write_trusty_rollback_index(u32 trusty_index)
+{
+	if (!trusty_index)
+		return 0;
+
+	return trusty_write_rollback_index(FIT_ROLLBACK_INDEX_LOCATION,
+					   (u64)trusty_index);
+}
+#endif
+
+void board_quiesce_devices(void *images)
+{
+	hotkey_run(HK_CMDLINE);
+	hotkey_run(HK_CLI_OS_GO);
+
+#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
+	/* Destroy atags makes next warm boot safer */
+	atags_destroy();
+#endif
+
+#ifdef CONFIG_FIT_ROLLBACK_PROTECT
+	int ret;
+
+	ret = fit_write_trusty_rollback_index(gd->rollback_index);
+	if (ret) {
+		panic("Failed to write fit rollback index %d, ret=%d",
+		      gd->rollback_index, ret);
+	}
+#endif
+
+#ifdef CONFIG_ROCKCHIP_HW_DECOMPRESS
+	misc_decompress_cleanup();
 #endif
 }

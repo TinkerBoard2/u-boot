@@ -33,6 +33,7 @@ struct pm_ctx {
 
 struct pre_serial {
 	u32 using_pre_serial;
+	u32 enable;
 	u32 id;
 	u32 baudrate;
 	ulong addr;
@@ -147,6 +148,9 @@ typedef struct global_data {
 	int log_drop_count;		/* Number of dropped log messages */
 	int default_log_level;		/* For devices with no filters */
 	struct list_head log_head;	/* List of struct log_device */
+#endif
+#if CONFIG_IS_ENABLED(FIT_ROLLBACK_PROTECT)
+	u32 rollback_index;
 #endif
 } gd_t;
 #endif
