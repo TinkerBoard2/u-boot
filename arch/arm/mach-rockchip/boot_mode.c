@@ -180,7 +180,7 @@ int rockchip_get_boot_mode(void)
 			reg_soc_status3 = readl((void *)CONFIG_GRF_SOC_STATUS3_REG);
 			if (reg_soc_status3 & (1 << 12)) {
 				printf("usbcphy0_otg_utmi_bvalid = 1\n");
-				boot_mode[PL] = BOOT_MODE_UMS;
+				boot_mode[PL] = BOOT_MODE_UMS_HW;
 				clear_boot_reg = 1;
 			} else {
 				printf("boot mode: None\n");
