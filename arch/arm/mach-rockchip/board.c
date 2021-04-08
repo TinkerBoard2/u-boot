@@ -122,80 +122,6 @@ static int rockchip_set_ethaddr(void)
 	return 0;
 }
 
-static int rockchip_set_serialno(void)
-{
-	u8 low[CPUID_LEN / 2], high[CPUID_LEN / 2];
-	u8 cpuid[CPUID_LEN] = {0};
-	char serialno_str[VENDOR_SN_MAX];
-	int ret = 0, i;
-	u64 serialno;
-
-	/* Read serial number from vendor storage part */
-	memset(serialno_str, 0, VENDOR_SN_MAX);
-
-#ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
-	ret = vendor_storage_read(VENDOR_SN_ID, serialno_str, (VENDOR_SN_MAX-1));
-	if (ret > 0) {
-		i = strlen(serialno_str);
-		for (; i > 0; i--) {
-			if ((serialno_str[i] >= 'a' && serialno_str[i] <= 'z') ||
-			    (serialno_str[i] >= 'A' && serialno_str[i] <= 'Z') ||
-			    (serialno_str[i] >= '0' && serialno_str[i] <= '9'))
-				break;
-		}
-
-		serialno_str[i + 1] = 0x0;
-		env_set("serial#", serialno_str);
-	} else {
-#endif
-#if defined(CONFIG_ROCKCHIP_EFUSE) || defined(CONFIG_ROCKCHIP_OTP)
-		struct udevice *dev;
-
-		/* retrieve the device */
-		if (IS_ENABLED(CONFIG_ROCKCHIP_EFUSE))
-			ret = uclass_get_device_by_driver(UCLASS_MISC,
-							  DM_GET_DRIVER(rockchip_efuse),
-							  &dev);
-		else
-			ret = uclass_get_device_by_driver(UCLASS_MISC,
-							  DM_GET_DRIVER(rockchip_otp),
-							  &dev);
-
-		if (ret) {
-			printf("%s: could not find efuse/otp device\n", __func__);
-			return ret;
-		}
-
-		/* read the cpu_id range from the efuses */
-		ret = misc_read(dev, CPUID_OFF, &cpuid, sizeof(cpuid));
-		if (ret) {
-			printf("%s: read cpuid from efuse/otp failed, ret=%d\n",
-			       __func__, ret);
-			return ret;
-		}
-#else
-		/* generate random cpuid */
-		for (i = 0; i < CPUID_LEN; i++)
-			cpuid[i] = (u8)(rand());
-#endif
-		/* Generate the serial number based on CPU ID */
-		for (i = 0; i < 8; i++) {
-			low[i] = cpuid[1 + (i << 1)];
-			high[i] = cpuid[i << 1];
-		}
-
-		serialno = crc32_no_comp(0, low, 8);
-		serialno |= (u64)crc32_no_comp(serialno, high, 8) << 32;
-		snprintf(serialno_str, sizeof(serialno_str), "%llx", serialno);
-
-		env_set("serial#", serialno_str);
-#ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
-	}
-#endif
-
-	return ret;
-}
-
 #if defined(CONFIG_USB_FUNCTION_FASTBOOT)
 int fb_set_reboot_flag(void)
 {
@@ -322,7 +248,6 @@ static void cmdline_handle(void)
 int board_late_init(void)
 {
 	rockchip_set_ethaddr();
-	rockchip_set_serialno();
 	setup_download_mode();
 #if (CONFIG_ROCKCHIP_BOOT_MODE_REG > 0)
 	setup_boot_mode();
