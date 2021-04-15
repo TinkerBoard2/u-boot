@@ -253,6 +253,7 @@
 #include <usb_mass_storage.h>
 #include <rockusb.h>
 
+#include <asm/io.h>
 #include <asm/unaligned.h>
 #include <linux/bitops.h>
 #include <linux/usb/gadget.h>
@@ -282,6 +283,8 @@ static const char fsg_string_interface[] = "Mass Storage";
 #define PAGE_CACHE_SIZE		(1 << PAGE_CACHE_SHIFT)
 #define kthread_create(...)	__builtin_return_address(0)
 #define wait_for_completion(...) do {} while (0)
+
+#define CONFIG_GRF_SOC_STATUS3_REG 0xff77e2ac
 
 struct kref {int x; };
 struct completion {int x; };
@@ -650,6 +653,7 @@ static int sleep_thread(struct fsg_common *common)
 {
 	int	rc = 0;
 	int i = 0, k = 0;
+	uint32_t reg_soc_status3;
 
 	/* Wait until a signal arrives or we are woken up */
 	for (;;) {
@@ -670,6 +674,12 @@ static int sleep_thread(struct fsg_common *common)
 			/* Check cable connection */
 			if (!g_dnl_board_usb_cable_connected())
 				return -EIO;
+
+			reg_soc_status3 = readl((void *)CONFIG_GRF_SOC_STATUS3_REG);
+			if (!(reg_soc_status3 & (1 << 12))) {
+				printf("Usb cable disconnected, exit ums.\n");
+				return -EIO;
+			}
 
 			k = 0;
 		}
