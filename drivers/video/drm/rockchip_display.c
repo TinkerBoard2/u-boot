@@ -1663,6 +1663,8 @@ static int rockchip_display_fixup_dts(void *blob)
 }
 #endif
 
+extern int  panel_i2c_reg_read(struct udevice *dev, uint offset);
+
 static int rockchip_display_probe(struct udevice *dev)
 {
 	struct video_priv *uc_priv = dev_get_uclass_priv(dev);
@@ -1707,6 +1709,31 @@ static int rockchip_display_probe(struct udevice *dev)
 	ofnode_for_each_subnode(node, route_node) {
 		if (!ofnode_is_available(node))
 			continue;
+		if (!strncmp(node.np->name, "route-dsi", 9)) {
+			struct udevice *powertip_dev;
+			struct udevice *rpi_dev;
+			int powertip_buffer = 0;
+			int rpi_buffer = 0;
+
+			i2c_get_chip_for_busnum(0x8, 0x45, 1, &rpi_dev);//rpi
+			rpi_buffer = panel_i2c_reg_read(rpi_dev, 0x80);
+
+			i2c_get_chip_for_busnum(0x8, 0x36, 1, &powertip_dev);//powertip
+			powertip_buffer = panel_i2c_reg_read(powertip_dev, 0x4);
+			printf("rockchip_display_probe rpi_buffer=%d  powertip_buffer=%d\n",rpi_buffer, powertip_buffer);
+
+			if (rpi_buffer == 0xDE  || rpi_buffer == 0xC3) {
+				rpi_panel_connected = true;
+			}  else if ((powertip_buffer > 0) && (powertip_buffer & 0xF0) == 0x80) {
+				powertip_panel_connected = true;
+			}
+
+			if (!powertip_panel_connected && !rpi_panel_connected) {
+					printf("rockchip_display_probe: no dsi panel connected\n");
+					continue;
+			}
+		}
+
 		phandle = ofnode_read_u32_default(node, "connect", -1);
 		if (phandle < 0) {
 			printf("Warn: can't find connect node's handle\n");
