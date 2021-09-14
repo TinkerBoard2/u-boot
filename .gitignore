@@ -87,3 +87,5 @@ GTAGS
 *.orig
 *~
 \#*#
+
+/tools/bmp2gray16
