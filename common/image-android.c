@@ -582,26 +582,6 @@ static int set_hw_property(struct fdt_header *working_fdt, char *path, char *pro
 	return 0;
 }
 
-static int set_hw_property_u32(struct fdt_header *working_fdt, char *path, char *property, u32 value)
-{
-	int offset;
-	int ret;
-
-	printf("set_hw_property_u32: %s %s %08x\n", path, property, value);
-	offset = fdt_path_offset (working_fdt, path);
-	if (offset < 0) {
-		printf("libfdt fdt_path_offset() returned %s\n", fdt_strerror(offset));
-		return -1;
-	}
-	ret = fdt_setprop_u32(working_fdt, offset, property, value);
-	if (ret < 0) {
-		printf("libfdt fdt_setprop_u32(): %s\n", fdt_strerror(ret));
-		return -1;
-	}
-
-	return 0;
-}
-
 static int flash_device_node(struct fdt_header *working_fdt, char *path, char *property, char *tag)
 {
 	int offset, len;;
@@ -838,9 +818,9 @@ static void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, str
 #endif
 
 	if (hw_conf->fiq_debugger == 1)
-		set_hw_property_u32(working_fdt, "/fiq-debugger", "rockchip,serial-id", 0x00000002);
+		set_hw_property(working_fdt, "/fiq-debugger", "status", "okay", 5);
 	else if (hw_conf->fiq_debugger == -1)
-		set_hw_property_u32(working_fdt, "/fiq-debugger", "rockchip,serial-id", 0xffffffff);
+		set_hw_property(working_fdt, "/fiq-debugger", "status", "disabled", 9);
 
 	if (hw_conf->i2c6 == 1)
 		set_hw_property(working_fdt, "/i2c@ff150000", "status", "okay", 5);
