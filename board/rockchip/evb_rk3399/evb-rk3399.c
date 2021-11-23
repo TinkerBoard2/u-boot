@@ -119,7 +119,7 @@ static void setup_serial(void)
 	u8 low[RK3399_CPUID_LEN/2], high[RK3399_CPUID_LEN/2];
 	char cpuid_str[RK3399_CPUID_LEN * 2 + 1];
 	u64 serialno;
-	char serialno_str[16];
+	char serialno_str[16 + 1];
 
 	/* retrieve the device */
 	ret = uclass_get_device_by_driver(UCLASS_MISC,
@@ -154,6 +154,8 @@ static void setup_serial(void)
 
 	serialno = crc32_no_comp(0, low, 8);
 	serialno |= (u64)crc32_no_comp(serialno, high, 8) << 32;
+
+	memset(serialno_str, 0, sizeof(serialno_str));
 	snprintf(serialno_str, sizeof(serialno_str), "%llx", serialno);
 
 	env_set("cpuid#", cpuid_str);
