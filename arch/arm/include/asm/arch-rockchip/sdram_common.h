@@ -42,9 +42,9 @@
 #define STRIDE_TYPE(n)			(((n) >> 16) & 0xff)
 
 #define DDR_2T_INFO(n)			((n) & 1)
-#define SSMOD_SPREAD(n)			(((n) >> 1) & 0x1f)
-#define SSMOD_DIV(n)			(((n) >> 6) & 0xf)
-#define SSMOD_DOWNSPREAD(n)		(((n) >> 10) & 0x1)
+#define PLL_SSMOD_SPREAD(n)		(((n) >> 1) & 0xff)
+#define PLL_SSMOD_DIV(n)		(((n) >> 9) & 0xff)
+#define PLL_SSMOD_DOWNSPREAD(n)		(((n) >> 17) & 0x3)
 
 /* sdram_head_info_v2 define */
 /* for *_drv_odten and *_drv_odtoff */
@@ -235,6 +235,8 @@ struct sdram_cap_info {
 	unsigned int cs3_row;
 	unsigned int cs0_high16bit_row;
 	unsigned int cs1_high16bit_row;
+	unsigned int cs2_high16bit_row;
+	unsigned int cs3_high16bit_row;
 	unsigned int ddrconfig;
 };
 
@@ -277,6 +279,15 @@ struct rw_trn_result {
 	struct fsp_rw_trn_result rd_fsp[FSP_NUM];
 	struct fsp_rw_trn_result wr_fsp[FSP_NUM];
 };
+
+/* for modify tRFC and related timing */
+#define DIE_CAP_512MBIT	64
+#define DIE_CAP_1GBIT	128
+#define DIE_CAP_2GBIT	256
+#define DIE_CAP_4GBIT	512
+#define DIE_CAP_8GBIT	1024
+#define DIE_CAP_16GBIT	2048
+#define DIE_CAP_32GBIT	4096
 
 /*
  * sys_reg bitfield struct
@@ -424,7 +435,7 @@ int sdram_detect_row(struct sdram_cap_info *cap_info,
 		     u32 coltmp, u32 bktmp, u32 rowtmp);
 int sdram_detect_row_3_4(struct sdram_cap_info *cap_info,
 			 u32 coltmp, u32 bktmp);
-int sdram_detect_high_row(struct sdram_cap_info *cap_info);
+int sdram_detect_high_row(struct sdram_cap_info *cap_info, u32 dramtype);
 int sdram_detect_cs1_row(struct sdram_cap_info *cap_info, u32 dram_type);
 
 void sdram_print_dram_type(unsigned char dramtype);

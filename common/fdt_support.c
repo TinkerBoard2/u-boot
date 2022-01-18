@@ -8,10 +8,12 @@
  */
 
 #include <common.h>
+#include <android_image.h>
 #include <exports.h>
 #include <fdt_support.h>
 #include <fdtdec.h>
 #include <inttypes.h>
+#include <malloc.h>
 #ifdef CONFIG_MTD_BLK
 #include <mtd_blk.h>
 #endif
@@ -278,6 +280,69 @@ int fdt_initrd(void *fdt, ulong initrd_start, ulong initrd_end)
 	return 0;
 }
 
+int fdt_bootargs_append(void *fdt, char *data)
+{
+	const char *arr_bootargs[] = { "bootargs", "bootargs_ext" };
+	int nodeoffset, len;
+	const char *bootargs;
+	char *str;
+	int i, ret = 0;
+
+	if (!data)
+		return 0;
+
+	/* find or create "/chosen" node. */
+	nodeoffset = fdt_find_or_add_subnode(fdt, 0, "chosen");
+	if (nodeoffset < 0)
+		return nodeoffset;
+
+	for (i = 0; i < ARRAY_SIZE(arr_bootargs); i++) {
+		bootargs = fdt_getprop(fdt, nodeoffset,
+				       arr_bootargs[i], NULL);
+		if (bootargs) {
+			len = strlen(bootargs) + strlen(data) + 2;
+			str = malloc(len);
+			if (!str)
+				return -ENOMEM;
+
+			fdt_increase_size(fdt, 512);
+			snprintf(str, len, "%s %s", bootargs, data);
+			ret = fdt_setprop(fdt, nodeoffset, arr_bootargs[i],
+					  str, len);
+			if (ret < 0)
+				printf("WARNING: could not set bootargs %s.\n", fdt_strerror(ret));
+
+			free(str);
+			break;
+		}
+	}
+
+	return ret;
+}
+
+int fdt_bootargs_append_ab(void *fdt, char *slot)
+{
+	char *str;
+	int len, ret = 0;
+
+	if (!slot)
+		return 0;
+
+	len = strlen(ANDROID_ARG_SLOT_SUFFIX) + strlen(slot) + 1;
+	str = malloc(len);
+	if (!str)
+		return -ENOMEM;
+
+	snprintf(str, len, "%s%s", ANDROID_ARG_SLOT_SUFFIX, slot);
+	ret = fdt_bootargs_append(fdt, str);
+	if (ret)
+		printf("Apend slot info to bootargs fail");
+
+	free(str);
+
+	return ret;
+}
+
 int fdt_chosen(void *fdt)
 {
 	/*
@@ -332,7 +397,7 @@ int fdt_chosen(void *fdt)
 				env_update("bootargs", bootargs);
 #endif
 #ifdef CONFIG_MTD_BLK
-				char *mtd_par_info = mtd_part_parse();
+				char *mtd_par_info = mtd_part_parse(NULL);
 
 				if (mtd_par_info) {
 					if (memcmp(env_get("devtype"), "mtd", 3) == 0)
@@ -587,20 +652,13 @@ int fdt_update_reserved_memory(void *blob, char *name, u64 start, u64 size)
 	int nodeoffset, len, err;
 	u8 tmp[16]; /* Up to 64-bit address + 64-bit size */
 
-#if 0
-	/*name is rockchip_logo*/
-	nodeoffset = fdt_find_or_add_subnode(blob, 0, "reserved-memory");
-	if (nodeoffset < 0)
-		return nodeoffset;
-	printf("hjc>>reserved-memory>>%s, nodeoffset:%d\n", __func__, nodeoffset);
-	nodeoffset = fdt_find_or_add_subnode(blob, nodeoffset, name);
-	if (nodeoffset < 0)
-		return nodeoffset;
-#else
 	nodeoffset = fdt_node_offset_by_compatible(blob, 0, name);
 	if (nodeoffset < 0)
 		debug("Can't find nodeoffset: %d\n", nodeoffset);
-#endif
+
+	if (!size)
+		return nodeoffset;
+
 	len = fdt_pack_reg(blob, tmp, &start, &size, 1);
 	err = fdt_setprop(blob, nodeoffset, "reg", tmp, len);
 	if (err < 0) {

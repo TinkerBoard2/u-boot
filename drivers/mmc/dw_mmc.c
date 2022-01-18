@@ -199,7 +199,6 @@ static int dwmci_data_transfer(struct dwmci_host *host, struct mmc_data *data)
 		/* Error during data transfer. */
 		if (mask & (DWMCI_DATA_ERR | DWMCI_DATA_TOUT)) {
 			debug("%s: DATA ERROR!\n", __func__);
-
 			dwmci_wait_reset(host, DWMCI_RESET_ALL);
 			dwmci_writel(host, DWMCI_CMD, DWMCI_CMD_PRV_DAT_WAIT |
 				     DWMCI_CMD_UPD_CLK | DWMCI_CMD_START);
@@ -448,8 +447,6 @@ static int dwmci_send_cmd(struct mmc *mmc, struct mmc_cmd *cmd,
 		}
 	}
 
-	udelay(100);
-
 	return ret;
 }
 
@@ -603,6 +600,9 @@ static int dwmci_setup_bus(struct dwmci_host *host, u32 freq)
 		debug("%s: Didn't get source clock value.\n", __func__);
 		return -EINVAL;
 	}
+
+	if (sclk == 0)
+		return -EINVAL;
 
 	if (sclk == freq)
 		div = 0;	/* bypass mode */
@@ -847,11 +847,21 @@ void dwmci_setup_cfg(struct mmc_config *cfg, struct dwmci_host *host,
 
 	cfg->host_caps = host->caps;
 
-	if (host->buswidth == 8) {
+	switch (host->buswidth) {
+	case 8:
 		cfg->host_caps |= MMC_MODE_8BIT | MMC_MODE_4BIT;
-	} else {
+		break;
+	case 4:
 		cfg->host_caps |= MMC_MODE_4BIT;
 		cfg->host_caps &= ~MMC_MODE_8BIT;
+		break;
+	case 1:
+		cfg->host_caps &= ~MMC_MODE_4BIT;
+		cfg->host_caps &= ~MMC_MODE_8BIT;
+		break;
+	default:
+		printf("Unsupported bus width: %d\n", host->buswidth);
+		break;
 	}
 	cfg->host_caps |= MMC_MODE_HS | MMC_MODE_HS_52MHz;
 

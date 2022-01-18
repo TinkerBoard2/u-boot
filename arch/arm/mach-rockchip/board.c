@@ -6,6 +6,7 @@
 
 #include <common.h>
 #include <amp.h>
+#include <android_ab.h>
 #include <android_bootloader.h>
 #include <android_image.h>
 #include <bidram.h>
@@ -30,6 +31,7 @@
 #include <video_rockchip.h>
 #include <asm/io.h>
 #include <asm/gpio.h>
+#include <android_avb/rk_avb_ops_user.h>
 #include <dm/uclass-internal.h>
 #include <dm/root.h>
 #include <power/charge_display.h>
@@ -95,7 +97,7 @@ static int rockchip_set_ethaddr(void)
 	int ret, i;
 	bool need_write = false, randomed = false;
 
-	ret = vendor_storage_read(VENDOR_LAN_MAC_ID, ethaddr, sizeof(ethaddr));
+	ret = vendor_storage_read(LAN_MAC_ID, ethaddr, sizeof(ethaddr));
 	for (i = 0; i < MAX_ETHERNET; i++) {
 		if (ret <= 0 || !is_valid_ethaddr(&ethaddr[i * ARP_HLEN])) {
 			if (!randomed) {
@@ -125,7 +127,7 @@ static int rockchip_set_ethaddr(void)
 	}
 
 	if (need_write) {
-		ret = vendor_storage_write(VENDOR_LAN_MAC_ID,
+		ret = vendor_storage_write(LAN_MAC_ID,
 					   ethaddr, sizeof(ethaddr));
 		if (ret < 0)
 			printf("%s: vendor_storage_write failed %d\n",
@@ -148,7 +150,7 @@ static int rockchip_set_serialno(void)
 	memset(serialno_str, 0, VENDOR_SN_MAX);
 
 #ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
-	ret = vendor_storage_read(VENDOR_SN_ID, serialno_str, (VENDOR_SN_MAX-1));
+	ret = vendor_storage_read(SN_ID, serialno_str, (VENDOR_SN_MAX-1));
 	if (ret > 0) {
 		i = strlen(serialno_str);
 		for (; i > 0; i--) {
@@ -369,9 +371,6 @@ int board_late_init(void)
 #if (CONFIG_ROCKCHIP_BOOT_MODE_REG > 0)
 	setup_boot_mode();
 #endif
-#ifdef CONFIG_AMP
-	amp_cpus_on();
-#endif
 #ifdef CONFIG_ROCKCHIP_USB_BOOT
 	boot_from_udisk();
 #endif
@@ -387,7 +386,9 @@ int board_late_init(void)
 	env_fixup();
 	soc_clk_dump();
 	cmdline_handle();
-
+#ifdef CONFIG_AMP
+	amp_cpus_on();
+#endif
 	return rk_board_late_init();
 }
 
@@ -471,6 +472,11 @@ int board_init(void)
 
 #ifdef CONFIG_DM_DVFS
 	dvfs_init(true);
+#endif
+
+#ifdef CONFIG_ANDROID_AB
+	if (ab_decrease_tries())
+		printf("Decrease ab tries count fail!\n");
 #endif
 
 	return rk_board_init();
@@ -616,6 +622,18 @@ int board_bidram_reserve(struct bidram *bidram)
 	if (ret)
 		return ret;
 
+	return 0;
+}
+
+int board_sysmem_reserve(struct sysmem *sysmem)
+{
+#ifdef CONFIG_SKIP_RELOCATE_UBOOT
+	if (!sysmem_alloc_base_by_name("NO-RELOC-CODE",
+	    CONFIG_SYS_TEXT_BASE, SZ_2M)) {
+		printf("Failed to reserve sysmem for U-Boot code\n");
+		return -ENOMEM;
+	}
+#endif
 	return 0;
 }
 
@@ -794,6 +812,16 @@ int bootm_board_start(void)
 	return 0;
 }
 
+int bootm_image_populate_dtb(void *img)
+{
+	if ((gd->flags & GD_FLG_KDTB_READY) && !gd->fdt_blob_kern)
+		sysmem_free((phys_addr_t)gd->fdt_blob);
+	else
+		gd->fdt_blob = (void *)env_get_ulong("fdt_addr_r", 16, 0);
+
+	return resource_populate_dtb(img, (void *)gd->fdt_blob);
+}
+
 /*
  * Implement it to support CLI command:
  *   - Android: bootm [aosp addr]
@@ -831,18 +859,18 @@ int board_do_bootm(int argc, char * const argv[])
 		hdr = (struct andr_img_hdr *)img;
 		printf("BOOTM: transferring to board Android\n");
 
-#ifdef CONFIG_USING_KERNEL_DTB
-		sysmem_free((phys_addr_t)gd->fdt_blob);
-		/* erase magic */
-		fdt_set_magic((void *)gd->fdt_blob, ~0);
-		gd->fdt_blob = NULL;
-#endif
 		load_addr = env_get_ulong("kernel_addr_r", 16, 0);
 		load_addr -= hdr->page_size;
 		size = android_image_get_end(hdr) - (ulong)hdr;
 
 		if (!sysmem_alloc_base(MEM_ANDROID, (ulong)hdr, size))
 			return -ENOMEM;
+
+		ret = bootm_image_populate_dtb(img);
+		if (ret) {
+			printf("bootm can't read dtb\n");
+			return ret;
+		}
 
 		ret = android_image_memcpy_separate(hdr, &load_addr);
 		if (ret) {
@@ -858,14 +886,22 @@ int board_do_bootm(int argc, char * const argv[])
 #if IMAGE_ENABLE_FIT
 	if (format == IMAGE_FORMAT_FIT) {
 		char boot_cmd[64];
+		int ret;
 
 		printf("BOOTM: transferring to board FIT\n");
+
+		ret = bootm_image_populate_dtb(img);
+		if (ret) {
+			printf("bootm can't read dtb\n");
+			return ret;
+		}
 		snprintf(boot_cmd, sizeof(boot_cmd), "boot_fit %s", argv[1]);
 		return run_command(boot_cmd, 0);
 	}
 #endif
 
 	/* uImage */
+#if 0
 #if defined(CONFIG_IMAGE_FORMAT_LEGACY)
 	if (format == IMAGE_FORMAT_LEGACY &&
 	    image_get_type(img) == IH_TYPE_MULTI) {
@@ -876,21 +912,25 @@ int board_do_bootm(int argc, char * const argv[])
 		return run_command(boot_cmd, 0);
 	}
 #endif
-
+#endif
 	return 0;
 }
 #endif
 
 void autoboot_command_fail_handle(void)
 {
-#ifdef CONFIG_AVB_VBMETA_PUBLIC_KEY_VALIDATE
 #ifdef CONFIG_ANDROID_AB
-	run_command("fastboot usb 0;", 0);  /* use fastboot to ative slot */
-#else
+	if (rk_avb_ab_have_bootable_slot() == true)
+		run_command("reset;", 0);
+	else
+		run_command("fastboot usb 0;", 0);
+#endif
+
+#ifdef CONFIG_AVB_VBMETA_PUBLIC_KEY_VALIDATE
 	run_command("rockusb 0 ${devtype} ${devnum}", 0);
 	run_command("fastboot usb 0;", 0);
 #endif
-#endif
+
 }
 
 #ifdef CONFIG_FIT_ROLLBACK_PROTECT
