@@ -25,6 +25,12 @@
 #include "rockchip_connector.h"
 #include "rockchip_panel.h"
 
+#include <i2c.h>
+
+extern bool powertip_panel_connected;
+extern bool rpi_panel_connected;
+extern unsigned int powertip_id;
+
 struct rockchip_cmd_header {
 	u8 data_type;
 	u8 delay_ms;
@@ -72,6 +78,40 @@ struct rockchip_panel_priv {
 	struct gpio_desc spi_scl_gpio;
 	struct gpio_desc spi_cs_gpio;
 };
+
+
+void panel_i2c_reg_write(struct udevice *dev, uint offset, uint value)
+{
+	#define PANEL_I2C_WRITE_RETRY_COUNT (6)
+	int ret = 0;
+	int i = 0;
+
+	do {
+		ret = dm_i2c_reg_write(dev, offset, value);
+		if (ret < 0) {
+			printf("panel_i2c_reg_write fail, reg = %x value = %x  i = %d ret = %d\n", offset, value, i, ret);
+			mdelay(20);
+		}
+	} while ((++i <= PANEL_I2C_WRITE_RETRY_COUNT) && (ret < 0));
+}
+
+int  panel_i2c_reg_read(struct udevice *dev, uint offset)
+{
+	#define PANEL_I2C_READ_RETRY_COUNT (3)
+	int ret = 0;
+	int i = 0;
+
+	do {
+		ret = dm_i2c_reg_read(dev, offset);
+		if (ret < 0) {
+			printf("panel_i2c_reg_read fail, i = %d  reg = %x ret = %d\n", i, offset, ret);
+			mdelay(20);
+		} else
+			return ret;
+	} while ((++i <= PANEL_I2C_READ_RETRY_COUNT) && (ret < 0));
+
+	return ret;
+}
 
 static inline int get_panel_cmd_type(const char *s)
 {
@@ -259,10 +299,24 @@ static void panel_simple_prepare(struct rockchip_panel *panel)
 	struct rockchip_panel_plat *plat = dev_get_platdata(panel->dev);
 	struct rockchip_panel_priv *priv = dev_get_priv(panel->dev);
 	struct mipi_dsi_device *dsi = dev_get_parent_platdata(panel->dev);
+	struct udevice *dev;
 	int ret;
+
+	printf("panel_simple_prepaer\n");
 
 	if (priv->prepared)
 		return;
+
+	if (powertip_panel_connected) {
+		i2c_get_chip_for_busnum(0x8, 0x36, 1, &dev);
+		panel_i2c_reg_write(dev, 0x5, 0x3);
+		mdelay(20);
+		panel_i2c_reg_write(dev, 0x5, 0x0);
+		mdelay(20);
+		panel_i2c_reg_write(dev, 0x5, 0x3);
+		mdelay(200);
+		printf("panel_simple_prepare powertip powerting on\n");
+	}
 
 	if (priv->power_supply)
 		regulator_set_enable(priv->power_supply, !plat->power_invert);
@@ -285,7 +339,7 @@ static void panel_simple_prepare(struct rockchip_panel *panel)
 	if (plat->delay.init)
 		mdelay(plat->delay.init);
 
-	if (plat->on_cmds) {
+	if (!rpi_panel_connected && plat->on_cmds) {
 		if (priv->cmd_type == CMD_TYPE_SPI)
 			ret = rockchip_panel_send_spi_cmds(panel->state,
 							   plat->on_cmds);
@@ -344,6 +398,33 @@ static void panel_simple_enable(struct rockchip_panel *panel)
 	struct rockchip_panel_plat *plat = dev_get_platdata(panel->dev);
 	struct rockchip_panel_priv *priv = dev_get_priv(panel->dev);
 
+	struct mipi_dsi_device *dsi = dev_get_parent_platdata(panel->dev);
+	struct udevice *dev;
+
+	printf("panel_simple_enable\n");
+
+	if (rpi_panel_connected) {
+		i2c_get_chip_for_busnum(0x8, 0x45, 1, &dev);
+		panel_i2c_reg_write(dev, 0x85, 0x0);
+		mdelay(200);
+		panel_i2c_reg_write(dev, 0x85, 0x1);
+		mdelay(100);
+		panel_i2c_reg_write(dev, 0x81, 0x4);
+		printf("panel_simple_prepare rpi powerting on\n");
+		mdelay(100);
+		rockchip_panel_send_dsi_cmds(dsi, plat->on_cmds);
+		mdelay(50);
+		panel_i2c_reg_write(dev, 0x86, 255);
+		printf("panel_simple_enable rpi backlight on\n");
+	} else if (powertip_panel_connected) {
+		i2c_get_chip_for_busnum(0x8, 0x36, 1, &dev);
+		mdelay(50);
+		panel_i2c_reg_write(dev, 0x6, 0x80|0x0F);
+		printf("panel_simple_enable powertip backlight on\n");
+		mdelay(50);
+		panel_i2c_reg_write(dev, 0x6, 0x80|0x1F);
+	}
+
 	if (priv->enabled)
 		return;
 
@@ -360,9 +441,22 @@ static void panel_simple_disable(struct rockchip_panel *panel)
 {
 	struct rockchip_panel_plat *plat = dev_get_platdata(panel->dev);
 	struct rockchip_panel_priv *priv = dev_get_priv(panel->dev);
+	struct udevice *dev;
 
 	if (!priv->enabled)
 		return;
+
+	if (rpi_panel_connected) {
+		i2c_get_chip_for_busnum(0x8, 0x45, 1, &dev);
+		dm_i2c_reg_write(dev, 0x86, 0);
+		dm_i2c_reg_write(dev, 0x85, 0x0);
+		mdelay(50);
+	} else if (powertip_panel_connected) {
+		i2c_get_chip_for_busnum(0x8, 0x36, 1, &dev);
+		dm_i2c_reg_write(dev, 0x6, 0);
+		dm_i2c_reg_write(dev, 0x5, 0x0);
+		mdelay(50);
+	}
 
 	if (priv->backlight)
 		backlight_disable(priv->backlight);
@@ -453,6 +547,8 @@ static int rockchip_panel_probe(struct udevice *dev)
 	struct rockchip_panel *panel;
 	int ret;
 	const char *cmd_type;
+	const void *data;
+	int len = 0;
 
 	ret = gpio_request_by_name(dev, "enable-gpios", 0,
 				   &priv->enable_gpio, GPIOD_IS_OUT);
@@ -515,6 +611,68 @@ static int rockchip_panel_probe(struct udevice *dev)
 		dm_gpio_set_value(&priv->spi_cs_gpio, 1);
 		dm_gpio_set_value(&priv->reset_gpio, 0);
 	}
+
+	if (rpi_panel_connected) {
+		plat->power_invert = 0;
+		plat->delay.prepare = 0;
+		plat->delay.unprepare = 0;
+		plat->delay.enable = 0;
+		plat->delay.disable = 0;
+		plat->delay.init = 0;
+		plat->delay.reset = 0;
+		plat->bus_format = MEDIA_BUS_FMT_RBG888_1X24;
+		plat->bpc = 8;
+		data = dev_read_prop(dev, "rpi-init-sequence", &len);
+		if (data) {
+			plat->on_cmds = calloc(1, sizeof(*plat->on_cmds));
+			if (plat->on_cmds) {
+				ret = rockchip_panel_parse_cmds(data, len, plat->on_cmds);
+				if (ret) {
+					printf("failed to parse panel init sequence\n");
+					free(plat->on_cmds);
+				}
+			}
+		}
+	} else if (powertip_panel_connected) {
+		plat->power_invert = 0;
+		plat->delay.prepare = 0;
+		plat->delay.unprepare = 0;
+		plat->delay.enable = 0;
+		plat->delay.disable = 0;
+		plat->delay.init = 0;
+		plat->delay.reset = 0;
+		plat->bus_format = MEDIA_BUS_FMT_RBG888_1X24;
+		plat->bpc = 8;
+
+		if (powertip_id == 0x86) {
+			data = dev_read_prop(dev, "powertip-rev-b-init-sequence", &len);
+		} else {
+			data = dev_read_prop(dev, "powertip-rev-a-init-sequence", &len);
+		}
+		if (data) {
+			plat->on_cmds = calloc(1, sizeof(*plat->on_cmds));
+			if (plat->on_cmds) {
+				ret = rockchip_panel_parse_cmds(data, len, plat->on_cmds);
+				if (ret) {
+					printf("failed to parse panel init sequence\n");
+					free(plat->on_cmds);
+				}
+			}
+		}
+
+		data = dev_read_prop(dev, "powertip-exit-sequence", &len);
+		if (data) {
+			plat->off_cmds = calloc(1, sizeof(*plat->off_cmds));
+			if (plat->off_cmds) {
+				ret = rockchip_panel_parse_cmds(data, len, plat->off_cmds);
+				if (ret) {
+					printf("failed to parse panel exit sequence\n");
+					free(plat->off_cmds);
+				}
+			}
+		}
+	}
+
 
 	panel = calloc(1, sizeof(*panel));
 	if (!panel)

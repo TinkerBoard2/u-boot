@@ -723,7 +723,7 @@ static ssize_t dw_mipi_dsi_transfer(struct dw_mipi_dsi *dsi,
 
 	if (msg->flags & MIPI_DSI_MSG_USE_LPM) {
 		dsi_update_bits(dsi, DSI_VID_MODE_CFG, LP_CMD_EN, LP_CMD_EN);
-		dsi_update_bits(dsi, DSI_LPCLK_CTRL, PHY_TXREQUESTCLKHS, 0);
+		//dsi_update_bits(dsi, DSI_LPCLK_CTRL, PHY_TXREQUESTCLKHS, 0);
 	} else {
 		dsi_update_bits(dsi, DSI_VID_MODE_CFG, LP_CMD_EN, 0);
 		dsi_update_bits(dsi, DSI_LPCLK_CTRL,
@@ -1706,10 +1706,39 @@ static int dw_mipi_dsi_child_post_bind(struct udevice *dev)
 	return 0;
 }
 
+extern int  panel_i2c_reg_read(struct udevice *dev, uint offset);
+bool powertip_panel_connected;
+bool rpi_panel_connected;
+unsigned int powertip_id;
+
 static int dw_mipi_dsi_child_pre_probe(struct udevice *dev)
 {
 	struct mipi_dsi_device *device = dev_get_parent_platdata(dev);
+	struct udevice *powertip_dev;
+	struct udevice *rpi_dev;
+	int powertip_buffer = 0;
+	int rpi_buffer = 0;
 	int ret;
+
+	i2c_get_chip_for_busnum(0x8, 0x45, 1, &rpi_dev);//rpi
+	rpi_buffer = panel_i2c_reg_read(rpi_dev, 0x80);
+
+	i2c_get_chip_for_busnum(0x8, 0x36, 1, &powertip_dev);//powertip
+	powertip_buffer = panel_i2c_reg_read(powertip_dev, 0x4);
+	printf(" dw_mipi_dsi_child_pre_probe rpi_buffer=%d  powertip_buffer=%d\n",rpi_buffer, powertip_buffer);
+
+	if (rpi_buffer == 0xDE  || rpi_buffer == 0xC3) {
+		rpi_panel_connected = true;
+		device->lanes = 1;
+		device->format = MIPI_DSI_FMT_RGB888;
+		device->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |MIPI_DSI_MODE_LPM;
+	} else if ((powertip_buffer & 0xF0) == 0x80) {
+		powertip_panel_connected = true;
+		powertip_id = powertip_buffer;
+		device->lanes = 2;
+		device->format = MIPI_DSI_FMT_RGB888;
+		device->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |MIPI_DSI_MODE_LPM;
+	}
 
 	ret = mipi_dsi_attach(device);
 	if (ret) {

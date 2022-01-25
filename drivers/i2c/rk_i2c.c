@@ -171,6 +171,8 @@ static int rk_i2c_read(struct rk_i2c *i2c, uchar chip, uint reg, uint r_len,
 	debug("rk_i2c_read: chip = %d, reg = %d, r_len = %d, b_len = %d\n",
 	      chip, reg, r_len, b_len);
 
+	if (chip == 0x45 || chip == 0x36) mdelay(2);
+
 	err = rk_i2c_send_start_bit(i2c);
 	if (err)
 		return err;
@@ -266,6 +268,9 @@ static int rk_i2c_write(struct rk_i2c *i2c, uchar chip, uint reg, uint r_len,
 
 	debug("rk_i2c_write: chip = %d, reg = %d, r_len = %d, b_len = %d\n",
 	      chip, reg, r_len, b_len);
+
+	if (chip == 0x45 || chip == 0x36) mdelay(2);
+
 	err = rk_i2c_send_start_bit(i2c);
 	if (err)
 		return err;
