@@ -604,8 +604,8 @@ static int flash_device_node(struct fdt_header *working_fdt, char *path, char *p
 	int uart0_rts[3] = {2, 19, 0};
 	int test_clkout2[3] = {0, 8, 3};
 
-	int gpio0_a0[4] = {0, 0, 0, 197};
-	int test_clkout_gpio[4] = {0, 8, 0, 197};
+	int gpio0_a0[3] = {0, 0, 0};
+	int test_clkout_gpio[3] = {0, 8, 0};
 
 	printf("flash_device_node: %s %s\n", path, property);
 
@@ -650,7 +650,7 @@ static int flash_device_node(struct fdt_header *working_fdt, char *path, char *p
 
 			if (!strcmp(tag, "spi1") || !strcmp(tag, "uart4")) {
 				if (get_spi1_clk || get_spi1_cs0 || get_spi1_rx || get_spi1_tx) {
-					for (j = 0; j < 4; j++) {
+					for (j = 0; j < 3; j++) {
 						adj_val = gpio0_a0[j];
 						adj_val = cpu_to_fdt32(adj_val);
 						fdt_setprop_inplace_namelen_partial(working_fdt, offset, property, strlen(property), (i+j)*4, &adj_val, sizeof(adj_val));
@@ -660,7 +660,7 @@ static int flash_device_node(struct fdt_header *working_fdt, char *path, char *p
 
 			if (!strcmp(tag, "uart0")) {
 				if (get_uart0_rts) {
-					for (j = 0; j < 4; j++) {
+					for (j = 0; j < 3; j++) {
 						adj_val = gpio0_a0[j];
 						adj_val = cpu_to_fdt32(adj_val);
 						fdt_setprop_inplace_namelen_partial(working_fdt, offset, property, strlen(property), (i+j)*4, &adj_val, sizeof(adj_val));
@@ -670,7 +670,7 @@ static int flash_device_node(struct fdt_header *working_fdt, char *path, char *p
 
 			if (!strcmp(tag, "test_clkout2")) {
 				if (get_test_clkout2) {
-					for (j = 0; j < 4; j++) {
+					for (j = 0; j < 3; j++) {
 						adj_val = test_clkout_gpio[j];
 						adj_val = cpu_to_fdt32(adj_val);
 						fdt_setprop_inplace_namelen_partial(working_fdt, offset, property, strlen(property), (i+j)*4, &adj_val, sizeof(adj_val));
