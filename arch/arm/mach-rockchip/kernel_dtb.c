@@ -8,11 +8,65 @@
 #include <dm.h>
 #include <malloc.h>
 #include <of_live.h>
+#include <dm/device-internal.h>
 #include <dm/root.h>
+#include <dm/uclass-internal.h>
 #include <asm/arch/hotkey.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#ifdef CONFIG_USING_KERNEL_DTB_V2
+static int dm_rm_kernel_dev(void)
+{
+	struct udevice *dev, *rec[10];
+	u32 uclass[] = { UCLASS_CRYPTO };
+	int i, j, k;
+
+	for (i = 0, j = 0; i < ARRAY_SIZE(uclass); i++) {
+		for (uclass_find_first_device(uclass[i], &dev); dev;
+		     uclass_find_next_device(&dev)) {
+			if (dev->flags & DM_FLAG_KNRL_DTB)
+				rec[j++] = dev;
+		}
+
+		for (k = 0; k < j; k++) {
+			device_remove(rec[k], DM_REMOVE_NORMAL);
+			device_unbind(rec[k]);
+		}
+	}
+
+	return 0;
+}
+
+static int dm_rm_u_boot_dev(void)
+{
+	struct udevice *dev, *rec[10];
+	u32 uclass[] = { UCLASS_ETH };
+	int del = 0;
+	int i, j, k;
+
+	for (i = 0, j = 0; i < ARRAY_SIZE(uclass); i++) {
+		for (uclass_find_first_device(uclass[i], &dev); dev;
+		     uclass_find_next_device(&dev)) {
+			if (dev->flags & DM_FLAG_KNRL_DTB)
+				del = 1;
+			else
+				rec[j++] = dev;
+		}
+
+		/* remove u-boot dev if there is someone from kernel */
+		if (del) {
+			for (k = 0; k < j; k++) {
+				device_remove(rec[k], DM_REMOVE_NORMAL);
+				device_unbind(rec[k]);
+			}
+		}
+	}
+
+	return 0;
+}
+
+#else
 /* Here, only fixup cru phandle, pmucru is not included */
 static int phandles_fixup_cru(const void *fdt)
 {
@@ -193,6 +247,7 @@ static int phandles_fixup_gpio(const void *fdt, void *ufdt)
 
 	return 0;
 }
+#endif
 
 __weak int board_mmc_dm_reinit(struct udevice *dev)
 {
@@ -240,9 +295,13 @@ static int dtb_check_ok(void *kfdt, void *ufdt)
 
 int init_kernel_dtb(void)
 {
+#ifndef CONFIG_USING_KERNEL_DTB_V2
+	void *ufdt_blob = (void *)gd->fdt_blob;
+#endif
 	ulong fdt_addr = 0;
-	void *ufdt_blob;
 	int ret = -ENODEV;
+
+	printf("DM: v%d\n", IS_ENABLED(CONFIG_USING_KERNEL_DTB_V2) ? 2 : 1);
 
 	/*
 	 * If memory size <= 128MB, we firstly try to get "fdt_addr1_r".
@@ -297,11 +356,10 @@ dtb_embed:
 	}
 
 dtb_okay:
-	ufdt_blob = (void *)gd->fdt_blob;
 	gd->fdt_blob = (void *)fdt_addr;
-
 	hotkey_run(HK_FDT);
 
+#ifndef CONFIG_USING_KERNEL_DTB_V2
 	/*
 	 * There is a phandle miss match between U-Boot and kernel dtb node,
 	 * we fixup it in U-Boot live dt nodes.
@@ -311,11 +369,17 @@ dtb_okay:
 	 */
 	phandles_fixup_cru((void *)gd->fdt_blob);
 	phandles_fixup_gpio((void *)gd->fdt_blob, (void *)ufdt_blob);
+#endif
 
 	gd->flags |= GD_FLG_KDTB_READY;
+	gd->of_root_f = gd->of_root;
 	of_live_build((void *)gd->fdt_blob, (struct device_node **)&gd->of_root);
 	dm_scan_fdt((void *)gd->fdt_blob, false);
 
+#ifdef CONFIG_USING_KERNEL_DTB_V2
+	dm_rm_kernel_dev();
+	dm_rm_u_boot_dev();
+#endif
 	/*
 	 * There maybe something for the mmc devices to do after kernel dtb
 	 * dm setup, eg: regain the clock device binding from kernel dtb.
@@ -329,3 +393,4 @@ dtb_okay:
 
 	return 0;
 }
+

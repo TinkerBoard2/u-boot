@@ -171,6 +171,38 @@ const void *of_get_property(const struct device_node *np, const char *name,
 	return pp ? pp->value : NULL;
 }
 
+const struct property *of_get_first_property(const struct device_node *np)
+{
+	if (!np)
+		return NULL;
+
+	return  np->properties;
+}
+
+const struct property *of_get_next_property(const struct device_node *np,
+					    const struct property *property)
+{
+	if (!np)
+		return NULL;
+
+	return property->next;
+}
+
+const void *of_get_property_by_prop(const struct device_node *np,
+				    const struct property *property,
+				    const char **name,
+				    int *lenp)
+{
+	if (!np || !property)
+		return NULL;
+	if (name)
+		*name = property->name;
+	if (lenp)
+		*lenp = property->length;
+
+	return property->value;
+}
+
 static const char *of_prop_next_string(struct property *prop, const char *cur)
 {
 	const void *curv = cur;
@@ -387,6 +419,16 @@ struct device_node *of_find_node_by_phandle(phandle handle)
 	for_each_of_allnodes(np)
 		if (np->phandle == handle)
 			break;
+
+#ifdef CONFIG_USING_KERNEL_DTB_V2
+	/* If not find in kernel fdt, traverse u-boot fdt */
+	if (!np) {
+		for (np = gd->of_root_f; np; np = of_find_all_nodes(np)) {
+			if (np->phandle == handle)
+				break;
+		}
+	}
+#endif
 	(void)of_node_get(np);
 
 	return np;

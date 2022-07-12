@@ -17,6 +17,7 @@
 #include <debug_uart.h>
 #include <dm.h>
 #include <dvfs.h>
+#include <fdt_support.h>
 #include <io-domain.h>
 #include <image.h>
 #include <key.h>
@@ -29,6 +30,7 @@
 #include <syscon.h>
 #include <sysmem.h>
 #include <video_rockchip.h>
+#include <xbc.h>
 #include <asm/io.h>
 #include <asm/gpio.h>
 #include <android_avb/rk_avb_ops_user.h>
@@ -51,6 +53,7 @@
 #ifdef CONFIG_ROCKCHIP_EINK_DISPLAY
 #include <rk_eink.h>
 #endif
+
 DECLARE_GLOBAL_DATA_PTR;
 
 __weak int rk_board_late_init(void)
@@ -78,6 +81,7 @@ __weak int rk_board_init(void)
 	return 0;
 }
 
+#ifdef CONFIG_ROCKCHIP_SET_ETHADDR
 /*
  * define serialno max length, the max length is 512 Bytes
  * The remaining bytes are used to ensure that the first 512 bytes
@@ -91,13 +95,15 @@ __weak int rk_board_init(void)
 
 static int rockchip_set_ethaddr(void)
 {
-#ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
+	__maybe_unused bool need_write = false;
+	bool randomed = false;
 	char buf[ARP_HLEN_ASCII + 1], mac[16];
 	u8 ethaddr[ARP_HLEN * MAX_ETHERNET] = {0};
-	int ret, i;
-	bool need_write = false, randomed = false;
+	int i, ret = -EINVAL;
 
+#ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
 	ret = vendor_storage_read(LAN_MAC_ID, ethaddr, sizeof(ethaddr));
+#endif
 	for (i = 0; i < MAX_ETHERNET; i++) {
 		if (ret <= 0 || !is_valid_ethaddr(&ethaddr[i * ARP_HLEN])) {
 			if (!randomed) {
@@ -117,7 +123,7 @@ static int rockchip_set_ethaddr(void)
 		}
 
 		if (is_valid_ethaddr(&ethaddr[i * ARP_HLEN])) {
-			sprintf(buf, "%pM", &ethaddr[i * ARP_HLEN]);
+			snprintf(buf, ARP_HLEN_ASCII + 1, "%pM", &ethaddr[i * ARP_HLEN]);
 			if (i == 0)
 				memcpy(mac, "ethaddr", sizeof("ethaddr"));
 			else
@@ -126,6 +132,7 @@ static int rockchip_set_ethaddr(void)
 		}
 	}
 
+#ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
 	if (need_write) {
 		ret = vendor_storage_write(LAN_MAC_ID,
 					   ethaddr, sizeof(ethaddr));
@@ -134,10 +141,11 @@ static int rockchip_set_ethaddr(void)
 			       __func__, ret);
 	}
 #endif
-
 	return 0;
 }
+#endif
 
+#ifdef CONFIG_ROCKCHIP_SET_SN
 static int rockchip_set_serialno(void)
 {
 	u8 low[CPUID_LEN / 2], high[CPUID_LEN / 2];
@@ -211,6 +219,8 @@ static int rockchip_set_serialno(void)
 
 	return ret;
 }
+#endif
+
 
 #if defined(CONFIG_USB_FUNCTION_FASTBOOT)
 int fb_set_reboot_flag(void)
@@ -339,22 +349,16 @@ static void cmdline_handle(void)
 {
 	struct blk_desc *dev_desc;
 
-#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
-	struct tag *t;
+	param_parse_pubkey_fuse_programmed();
 
-	t = atags_get_tag(ATAG_PUB_KEY);
-	if (t) {
-		/* Pass if efuse/otp programmed */
-		if (t->u.pub_key.flag == PUBKEY_FUSE_PROGRAMMED)
-			env_update("bootargs", "fuse.programmed=1");
-		else
-			env_update("bootargs", "fuse.programmed=0");
-	}
-#endif
 	dev_desc = rockchip_get_bootdev();
 	if (!dev_desc)
 		return;
 
+	/*
+	 * From rk356x, the sd/udisk update flag was moved from
+	 * IDB to Android BCB.
+	 */
 	if (get_bcb_recovery_msg() == BCB_MSG_RECOVERY_RK_FWUPDATE) {
 		if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 1)
 			env_update("bootargs", "sdfwupdate");
@@ -365,8 +369,12 @@ static void cmdline_handle(void)
 
 int board_late_init(void)
 {
+#ifdef CONFIG_ROCKCHIP_SET_ETHADDR
 	rockchip_set_ethaddr();
+#endif
+#ifdef CONFIG_ROCKCHIP_SET_SN
 	rockchip_set_serialno();
+#endif
 	setup_download_mode();
 #if (CONFIG_ROCKCHIP_BOOT_MODE_REG > 0)
 	setup_boot_mode();
@@ -427,7 +435,7 @@ static void board_debug_init(void)
 		printf("Cmd interface: disabled\n");
 }
 
-#ifdef CONFIG_MTD_BLK
+#if defined(CONFIG_MTD_BLK) && defined(CONFIG_USING_KERNEL_DTB)
 static void board_mtd_blk_map_partitions(void)
 {
 	struct blk_desc *dev_desc;
@@ -441,6 +449,10 @@ static void board_mtd_blk_map_partitions(void)
 int board_init(void)
 {
 	board_debug_init();
+	/* optee select security level */
+#ifdef CONFIG_OPTEE_CLIENT
+	trusty_select_security_level();
+#endif
 
 #ifdef DEBUG
 	soc_clk_dump();
@@ -537,10 +549,40 @@ int board_initr_caches_fixup(void)
 }
 #endif
 
-void arch_preboot_os(uint32_t bootm_state)
+void arch_preboot_os(uint32_t bootm_state, bootm_headers_t *images)
 {
-	if (bootm_state & BOOTM_STATE_OS_PREP)
-		hotkey_run(HK_CLI_OS_PRE);
+	if (!(bootm_state & BOOTM_STATE_OS_PREP))
+		return;
+
+#ifdef CONFIG_ARM64
+	u8 *data = (void *)images->ep;
+
+	/*
+	 * Fix kernel 5.10 arm64 boot warning:
+	 * "[Firmware Bug]: Kernel image misaligned at boot, please fix your bootloader!"
+	 *
+	 * kernel: 5.10 commit 120dc60d0bdb ("arm64: get rid of TEXT_OFFSET")
+	 * arm64 kernel version:
+	 *	data[10] == 0x00 if kernel version >= 5.10: N*2MB align
+	 *	data[10] == 0x08 if kernel version <  5.10: N*2MB + 0x80000(TEXT_OFFSET)
+	 *
+	 * Why fix here?
+	 *   1. this is the common and final path for any boot command.
+	 *   2. don't influence original boot flow, just fix it exactly before
+	 *	jumping kernel.
+	 *
+	 * But relocation is in board_quiesce_devices() until all decompress
+	 * done, mainly for saving boot time.
+	 */
+	if (data[10] == 0x00) {
+		if (round_down(images->ep, SZ_2M) != images->ep)
+			images->ep = round_down(images->ep, SZ_2M);
+	} else {
+		if (IS_ALIGNED(images->ep, SZ_2M))
+			images->ep += 0x80000;
+	}
+#endif
+	hotkey_run(HK_CLI_OS_PRE);
 }
 
 void enable_caches(void)
@@ -625,6 +667,7 @@ int board_bidram_reserve(struct bidram *bidram)
 	return 0;
 }
 
+#ifdef CONFIG_SYSMEM
 int board_sysmem_reserve(struct sysmem *sysmem)
 {
 #ifdef CONFIG_SKIP_RELOCATE_UBOOT
@@ -636,6 +679,7 @@ int board_sysmem_reserve(struct sysmem *sysmem)
 #endif
 	return 0;
 }
+#endif
 
 parse_fn_t board_bidram_parse_fn(void)
 {
@@ -647,31 +691,9 @@ int board_init_f_boot_flags(void)
 {
 	int boot_flags = 0;
 
-	/* pre-loader serial */
-#if defined(CONFIG_ROCKCHIP_PRELOADER_SERIAL) && \
-    defined(CONFIG_ROCKCHIP_PRELOADER_ATAGS)
-	struct tag *t;
+	arch_fpga_init();
 
-	t = atags_get_tag(ATAG_SERIAL);
-	if (t) {
-		gd->serial.using_pre_serial = 1;
-		gd->serial.enable = t->u.serial.enable;
-		gd->serial.baudrate = t->u.serial.baudrate;
-		gd->serial.addr = t->u.serial.addr;
-		gd->serial.id = t->u.serial.id;
-		gd->baudrate = CONFIG_BAUDRATE;
-		if (!t->u.serial.enable)
-			boot_flags |= GD_FLG_DISABLE_CONSOLE;
-		debug("preloader: enable=%d, addr=0x%lx, baudrate=%d, id=%d\n",
-		      gd->serial.enable, gd->serial.addr,
-		      gd->serial.baudrate, gd->serial.id);
-	} else
-#endif
-	{
-		gd->baudrate = CONFIG_BAUDRATE;
-		gd->serial.baudrate = CONFIG_BAUDRATE;
-		gd->serial.addr = CONFIG_DEBUG_UART_BASE;
-	}
+	param_parse_pre_serial(&boot_flags);
 
 	/* The highest priority to turn off (override) console */
 #if defined(CONFIG_DISABLE_CONSOLE)
@@ -819,7 +841,7 @@ int bootm_image_populate_dtb(void *img)
 	else
 		gd->fdt_blob = (void *)env_get_ulong("fdt_addr_r", 16, 0);
 
-	return resource_populate_dtb(img, (void *)gd->fdt_blob);
+	return rockchip_ram_read_dtb_file(img, (void *)gd->fdt_blob);
 }
 
 /*
@@ -842,6 +864,7 @@ int board_do_bootm(int argc, char * const argv[])
 	int format;
 	void *img;
 
+	/* only 'bootm' full image goes further */
 	if (argc != 2)
 		return 0;
 
@@ -868,7 +891,7 @@ int board_do_bootm(int argc, char * const argv[])
 
 		ret = bootm_image_populate_dtb(img);
 		if (ret) {
-			printf("bootm can't read dtb\n");
+			printf("bootm can't read dtb, ret=%d\n", ret);
 			return ret;
 		}
 
@@ -892,7 +915,7 @@ int board_do_bootm(int argc, char * const argv[])
 
 		ret = bootm_image_populate_dtb(img);
 		if (ret) {
-			printf("bootm can't read dtb\n");
+			printf("bootm can't read dtb, ret=%d\n", ret);
 			return ret;
 		}
 		snprintf(boot_cmd, sizeof(boot_cmd), "boot_fit %s", argv[1]);
@@ -960,30 +983,25 @@ int fit_read_otp_rollback_index(uint32_t fit_index, uint32_t *otp_index)
 	return 0;
 }
 
-static int fit_write_trusty_rollback_index(u32 trusty_index)
+int fit_write_trusty_rollback_index(u32 trusty_index)
 {
 	if (!trusty_index)
 		return 0;
-
+#ifdef CONFIG_OPTEE_CLIENT
 	return trusty_write_rollback_index(FIT_ROLLBACK_INDEX_LOCATION,
 					   (u64)trusty_index);
+#else
+	return 0;
+#endif
 }
 #endif
 
 void board_quiesce_devices(void *images)
 {
-	hotkey_run(HK_CMDLINE);
-	hotkey_run(HK_CLI_OS_GO);
-
 #ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
 	/* Destroy atags makes next warm boot safer */
 	atags_destroy();
 #endif
-
-#ifdef CONFIG_ROCKCHIP_REBOOT_TEST
-	do_reset(NULL, 0, 0, NULL);
-#endif
-
 #ifdef CONFIG_FIT_ROLLBACK_PROTECT
 	int ret;
 
@@ -993,8 +1011,207 @@ void board_quiesce_devices(void *images)
 		      gd->rollback_index, ret);
 	}
 #endif
-
 #ifdef CONFIG_ROCKCHIP_HW_DECOMPRESS
 	misc_decompress_cleanup();
 #endif
+#ifdef CONFIG_ARM64
+	bootm_headers_t *bootm_images = (bootm_headers_t *)images;
+	ulong kernel_addr;
+
+	/* relocate kernel after decompress cleanup */
+	kernel_addr = env_get_ulong("kernel_addr_r", 16, 0);
+	if (kernel_addr != bootm_images->ep) {
+		memmove((char *)bootm_images->ep, (const char *)kernel_addr,
+			bootm_images->os.image_len);
+		printf("== DO RELOCATE == Kernel from 0x%08lx to 0x%08lx\n",
+		       kernel_addr, bootm_images->ep);
+	}
+#endif
+
+	hotkey_run(HK_CMDLINE);
+	hotkey_run(HK_CLI_OS_GO);
+#ifdef CONFIG_ROCKCHIP_REBOOT_TEST
+	do_reset(NULL, 0, 0, NULL);
+#endif
 }
+
+char *board_fdt_chosen_bootargs(void *fdt)
+{
+	/* bootargs_ext is used when dtbo is applied. */
+	const char *arr_bootargs[] = { "bootargs", "bootargs_ext" };
+	const char *bootargs;
+	int nodeoffset;
+	int i, dump;
+	char *msg = "kernel";
+
+	/* debug */
+	hotkey_run(HK_INITCALL);
+	dump = is_hotkey(HK_CMDLINE);
+	if (dump)
+		printf("## bootargs(u-boot): %s\n\n", env_get("bootargs"));
+
+	/* find or create "/chosen" node. */
+	nodeoffset = fdt_find_or_add_subnode(fdt, 0, "chosen");
+	if (nodeoffset < 0)
+		return NULL;
+
+	for (i = 0; i < ARRAY_SIZE(arr_bootargs); i++) {
+		bootargs = fdt_getprop(fdt, nodeoffset, arr_bootargs[i], NULL);
+		if (!bootargs)
+			continue;
+		if (dump)
+			printf("## bootargs(%s-%s): %s\n\n",
+			       msg, arr_bootargs[i], bootargs);
+		/*
+		 * Append kernel bootargs
+		 * If use AB system, delete default "root=" which route
+		 * to rootfs. Then the ab bootctl will choose the
+		 * high priority system to boot and add its UUID
+		 * to cmdline. The format is "roo=PARTUUID=xxxx...".
+		 */
+#ifdef CONFIG_ANDROID_AB
+		env_update_filter("bootargs", bootargs, "root=");
+#else
+		env_update("bootargs", bootargs);
+#endif
+	}
+
+#ifdef CONFIG_ENVF
+	char * sys_bootargs;
+
+	sys_bootargs = env_get("sys_bootargs");
+	if (sys_bootargs) {
+		env_update("bootargs", sys_bootargs);
+		if (dump)
+			printf("## sys_bootargs: %s\n\n", sys_bootargs);
+	}
+#endif
+#ifdef CONFIG_MTD_BLK
+	if (!env_get("mtdparts")) {
+		char *mtd_par_info = mtd_part_parse(NULL);
+
+		if (mtd_par_info) {
+			if (memcmp(env_get("devtype"), "mtd", 3) == 0)
+				env_update("bootargs", mtd_par_info);
+		}
+	}
+#endif
+	/*
+	 * Initrd fixup: remove unused "initrd=0x...,0x...",
+	 * this for compatible with legacy parameter.txt
+	 */
+	env_delete("bootargs", "initrd=", 0);
+
+	/*
+	 * If uart is required to be disabled during
+	 * power on, it would be not initialized by
+	 * any pre-loader and U-Boot.
+	 *
+	 * If we don't remove earlycon from commandline,
+	 * kernel hangs while using earlycon to putc/getc
+	 * which may dead loop for waiting uart status.
+	 * (It seems the root cause is baundrate is not
+	 * initilalized)
+	 *
+	 * So let's remove earlycon from commandline.
+	 */
+	if (gd->flags & GD_FLG_DISABLE_CONSOLE)
+		env_delete("bootargs", "earlycon=", 0);
+
+	/* Android header v4+ need this handle */
+#ifdef CONFIG_ANDROID_BOOT_IMAGE
+	struct andr_img_hdr *hdr;
+
+	hdr = (void *)env_get_ulong("android_addr_r", 16, 0);
+	if (hdr && !android_image_check_header(hdr) && hdr->header_version >= 4) {
+		if (env_update_extract_subset("bootargs", "andr_bootargs", "androidboot."))
+			printf("extract androidboot.xxx error\n");
+		if (dump)
+			printf("## bootargs(android): %s\n\n", env_get("andr_bootargs"));
+	}
+#endif
+	bootargs = env_get("bootargs");
+	if (dump)
+		printf("## bootargs(merged): %s\n\n", bootargs);
+
+	return (char *)bootargs;
+}
+
+int ft_verify_fdt(void *fdt)
+{
+	/* for android header v4+, we load bootparams and fixup initrd */
+#if defined(CONFIG_ANDROID_BOOT_IMAGE) && defined(CONFIG_XBC)
+	struct andr_img_hdr *hdr;
+	uint64_t initrd_start, initrd_end;
+	char *bootargs, *p;
+	int nodeoffset;
+	int is_u64, err;
+	u32 len;
+
+	hdr = (void *)env_get_ulong("android_addr_r", 16, 0);
+	if (!hdr || android_image_check_header(hdr) ||
+	    hdr->header_version < 4)
+		return 1;
+
+	bootargs = env_get("andr_bootargs");
+	if (!bootargs)
+		return 1;
+
+	/* trans character: space to new line */
+	p = bootargs;
+	while (*p++) {
+		if (*p == ' ')
+			*p = '\n';
+	}
+
+	debug("## andr_bootargs: %s\n", bootargs);
+
+	/*
+	 * add boot params right after bootconfig
+	 *
+	 * because we can get final full bootargs in board_fdt_chosen_bootargs(),
+	 * android_image_get_ramdisk() is early than that.
+	 *
+	 * we have to add boot params by now.
+	 */
+	len = addBootConfigParameters((char *)bootargs, strlen(bootargs),
+		(u64)hdr->ramdisk_addr + hdr->ramdisk_size +
+		hdr->vendor_ramdisk_size, hdr->vendor_bootconfig_size);
+	if (len < 0) {
+		printf("error: addBootConfigParameters\n");
+		return 0;
+	}
+
+	nodeoffset = fdt_subnode_offset(fdt, 0, "chosen");
+	if (nodeoffset < 0) {
+		printf("error: No /chosen node\n");
+		return 0;
+	}
+
+	/* fixup initrd with real value */
+	fdt_delprop(fdt, nodeoffset, "linux,initrd-start");
+	fdt_delprop(fdt, nodeoffset, "linux,initrd-end");
+
+	is_u64 = (fdt_address_cells(fdt, 0) == 2);
+	initrd_start = hdr->ramdisk_addr;
+	initrd_end = initrd_start + hdr->ramdisk_size +
+			hdr->vendor_ramdisk_size +
+			hdr->vendor_bootconfig_size + len;
+	err = fdt_setprop_uxx(fdt, nodeoffset, "linux,initrd-start",
+			      initrd_start, is_u64);
+	if (err < 0) {
+		printf("WARNING: could not set linux,initrd-start %s.\n",
+		       fdt_strerror(err));
+		return 0;
+	}
+	err = fdt_setprop_uxx(fdt, nodeoffset, "linux,initrd-end",
+			      initrd_end, is_u64);
+	if (err < 0) {
+		printf("WARNING: could not set linux,initrd-end %s.\n",
+		       fdt_strerror(err));
+		return 0;
+	}
+#endif
+	return 1;
+}
+

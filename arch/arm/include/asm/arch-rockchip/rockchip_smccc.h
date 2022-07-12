@@ -28,6 +28,7 @@
 #define SIP_SOC_BUS_DIV			0x8200000d
 #define SIP_LAST_LOG			0x8200000e
 #define SIP_AMP_CFG			0x82000022
+#define SIP_HDCP_CONFIG			0x82000025
 
 #define ROCKCHIP_SIP_CONFIG_DRAM_INIT		0x00
 #define ROCKCHIP_SIP_CONFIG_DRAM_SET_RATE	0x01
@@ -38,6 +39,13 @@
 #define ROCKCHIP_SIP_CONFIG_DRAM_CLR_IRQ	0x06
 #define ROCKCHIP_SIP_CONFIG_DRAM_SET_PARAM	0x07
 #define ROCKCHIP_SIP_CONFIG_DRAM_GET_VERSION	0x08
+#define ROCKCHIP_SIP_CONFIG_DRAM_POST_SET_RATE	0x09
+#define ROCKCHIP_SIP_CONFIG_DRAM_SET_NOC_RL	0x0a
+#define ROCKCHIP_SIP_CONFIG_DRAM_DEBUG		0x0b
+#define ROCKCHIP_SIP_CONFIG_DRAM_MCU_START	0x0c
+#define ROCKCHIP_SIP_CONFIG_DRAM_ECC		0x0d
+#define ROCKCHIP_SIP_CONFIG_DRAM_GET_FREQ_INFO	0x0e
+#define ROCKCHIP_SIP_CONFIG_DRAM_FSP_INIT	0x0f
 
 /* Rockchip Sip version */
 #define SIP_IMPLEMENT_V1                (1)
@@ -67,8 +75,22 @@ typedef enum {
 	SHARE_PAGE_TYPE_INVALID = 0,
 	SHARE_PAGE_TYPE_UARTDBG,
 	SHARE_PAGE_TYPE_DDR,
+	SHARE_PAGE_TYPE_DDRDBG,
+	SHARE_PAGE_TYPE_DDRECC,
+	SHARE_PAGE_TYPE_DDRFSP,
+	SHARE_PAGE_TYPE_DDR_ADDRMAP,
+	SHARE_PAGE_TYPE_LAST_LOG,
+	SHARE_PAGE_TYPE_HDCP,
 	SHARE_PAGE_TYPE_MAX,
 } share_page_type_t;
+
+/* hdcp config func */
+typedef enum {
+	HDCP_FUNC_STORAGE_ENCRYPT = 1,
+	HDCP_FUNC_KEY_DECRYPT,
+	HDCP_FUNC_KEY_LOAD,
+	HDCP_FUNC_ENCRYPT_MODE
+} sip_hdcp_func_t;
 
 /*
  * sip_smc_set_suspend_mode() - Set U-Boot system suspend state before trap to trust.
@@ -140,6 +162,14 @@ int sip_smc_set_sip_version(unsigned long version);
  *  sip version), otherwise failed.
  */
 struct arm_smccc_res sip_smc_get_sip_version(void);
+
+/*
+ * sip_smc_hdcp_config() - handle hdcp.
+ *
+ * @return  0 on success, otherwise failed.
+ */
+int sip_smc_hdcp_config(unsigned long func,
+			unsigned long arg1, unsigned long arg2);
 
 /*
  * psci_cpu_on() - Standard ARM PSCI cpu on call.

@@ -171,7 +171,7 @@ struct base2_disp_info *rockchip_get_disp_info(int type, int id)
 	disp_info = base_parameter_addr + offset;
 	if (disp_info->screen_info[0].type != type ||
 	    disp_info->screen_info[0].id != id) {
-		printf("connector type or id is error, type:%d, id:%d\n",
+		printf("base2_disp_info couldn't be found, screen_info type[%d] or id[%d] mismatched\n",
 		       disp_info->screen_info[0].type,
 		       disp_info->screen_info[0].id);
 		return NULL;
@@ -313,7 +313,7 @@ static unsigned long get_cubic_memory_size(void)
 
 bool can_direct_logo(int bpp)
 {
-	return bpp == 24 || bpp == 32;
+	return bpp == 16 || bpp == 32;
 }
 
 static int connector_phy_init(struct display_state *state,
@@ -410,7 +410,7 @@ int drm_mode_vrefresh(const struct drm_display_mode *mode)
 	return refresh;
 }
 
-static int display_get_detail_timing(ofnode node, struct drm_display_mode *mode)
+int rockchip_ofnode_get_display_mode(ofnode node, struct drm_display_mode *mode)
 {
 	int hactive, vactive, pixelclock;
 	int hfront_porch, hback_porch, hsync_len;
@@ -464,6 +464,7 @@ static int display_get_detail_timing(ofnode node, struct drm_display_mode *mode)
 
 	mode->clock = pixelclock / 1000;
 	mode->flags = flags;
+	mode->vrefresh = drm_mode_vrefresh(mode);
 
 	return 0;
 }
@@ -472,7 +473,7 @@ static int display_get_force_timing_from_dts(ofnode node, struct drm_display_mod
 {
 	int ret = 0;
 
-	ret = display_get_detail_timing(node, mode);
+	ret = rockchip_ofnode_get_display_mode(node, mode);
 
 	if (ret) {
 		mode->clock = 74250;
@@ -505,31 +506,36 @@ static int display_get_timing_from_dts(struct panel_state *panel_state,
 				       struct drm_display_mode *mode)
 {
 	struct rockchip_panel *panel = panel_state->panel;
-	int phandle;
-	ofnode timing, native_mode;
+	struct ofnode_phandle_args args;
+	ofnode dt, timing;
+	int ret;
 
-	timing = dev_read_subnode(panel->dev, "display-timings");
+	dt = dev_read_subnode(panel->dev, "display-timings");
 	if (rpi_panel_connected) {
-		timing = dev_read_subnode(panel->dev, "rpi-display-timings");
+		dt = dev_read_subnode(panel->dev, "rpi-display-timings");
 	} else if (powertip_panel_connected) {
-		timing = dev_read_subnode(panel->dev, "powertip-display-timings");
+		dt = dev_read_subnode(panel->dev, "powertip-display-timings");
 	} else{
-		timing = dev_read_subnode(panel->dev, "display-timings");
-	}
-	if (!ofnode_valid(timing))
-		return -ENODEV;
-
-	native_mode = ofnode_find_subnode(timing, "timing");
-	if (!ofnode_valid(native_mode)) {
-		phandle = ofnode_read_u32_default(timing, "native-mode", -1);
-		native_mode = np_to_ofnode(of_find_node_by_phandle(phandle));
-		if (!ofnode_valid(native_mode)) {
-			printf("failed to get display timings from DT\n");
-			return -ENXIO;
-		}
+		dt = dev_read_subnode(panel->dev, "display-timings");
 	}
 
-	display_get_detail_timing(native_mode, mode);
+	if (ofnode_valid(dt)) {
+		ret = ofnode_parse_phandle_with_args(dt, "native-mode", NULL,
+						     0, 0, &args);
+		if (ret)
+			return ret;
+
+		timing = args.node;
+	} else {
+		timing = dev_read_subnode(panel->dev, "panel-timing");
+	}
+
+	if (!ofnode_valid(timing)) {
+		printf("failed to get display timings from DT\n");
+		return -ENXIO;
+	}
+
+	rockchip_ofnode_get_display_mode(timing, mode);
 
 	return 0;
 }
@@ -753,7 +759,7 @@ static int display_get_edid_mode(struct display_state *state)
 	struct drm_display_mode *mode = &conn_state->mode;
 	int bpc;
 
-	ret = edid_get_drm_mode(conn_state->edid, ret, mode, &bpc);
+	ret = edid_get_drm_mode(conn_state->edid, sizeof(conn_state->edid), mode, &bpc);
 	if (!ret) {
 		conn_state->bpc = bpc;
 		edid_print_info((void *)&conn_state->edid);
@@ -826,7 +832,10 @@ static int display_init(struct display_state *state)
 	}
 
 	if (panel_state->panel)
-		rockchip_panel_init(panel_state->panel);
+		rockchip_panel_init(panel_state->panel, state);
+
+	if (conn_state->bridge)
+		rockchip_bridge_init(conn_state->bridge, state);
 
 	if (conn_funcs->init) {
 		ret = conn_funcs->init(state);
@@ -1095,36 +1104,36 @@ static int display_logo(struct display_state *state)
 	}
 	hdisplay = conn_state->mode.hdisplay;
 	vdisplay = conn_state->mode.vdisplay;
-	crtc_state->src_w = logo->width;
-	crtc_state->src_h = logo->height;
-	crtc_state->src_x = 0;
-	crtc_state->src_y = 0;
+	crtc_state->src_rect.w = logo->width;
+	crtc_state->src_rect.h = logo->height;
+	crtc_state->src_rect.x = 0;
+	crtc_state->src_rect.y = 0;
 	crtc_state->ymirror = logo->ymirror;
 	crtc_state->rb_swap = 0;
 
 	crtc_state->dma_addr = (u32)(unsigned long)logo->mem + logo->offset;
-	crtc_state->xvir = ALIGN(crtc_state->src_w * logo->bpp, 32) >> 5;
+	crtc_state->xvir = ALIGN(crtc_state->src_rect.w * logo->bpp, 32) >> 5;
 
 	if (logo->mode == ROCKCHIP_DISPLAY_FULLSCREEN) {
-		crtc_state->crtc_x = 0;
-		crtc_state->crtc_y = 0;
-		crtc_state->crtc_w = hdisplay;
-		crtc_state->crtc_h = vdisplay;
+		crtc_state->crtc_rect.x = 0;
+		crtc_state->crtc_rect.y = 0;
+		crtc_state->crtc_rect.w = hdisplay;
+		crtc_state->crtc_rect.h = vdisplay;
 	} else {
-		if (crtc_state->src_w >= hdisplay) {
-			crtc_state->crtc_x = 0;
-			crtc_state->crtc_w = hdisplay;
+		if (crtc_state->src_rect.w >= hdisplay) {
+			crtc_state->crtc_rect.x = 0;
+			crtc_state->crtc_rect.w = hdisplay;
 		} else {
-			crtc_state->crtc_x = (hdisplay - crtc_state->src_w) / 2;
-			crtc_state->crtc_w = crtc_state->src_w;
+			crtc_state->crtc_rect.x = (hdisplay - crtc_state->src_rect.w) / 2;
+			crtc_state->crtc_rect.w = crtc_state->src_rect.w;
 		}
 
-		if (crtc_state->src_h >= vdisplay) {
-			crtc_state->crtc_y = 0;
-			crtc_state->crtc_h = vdisplay;
+		if (crtc_state->src_rect.h >= vdisplay) {
+			crtc_state->crtc_rect.y = 0;
+			crtc_state->crtc_rect.h = vdisplay;
 		} else {
-			crtc_state->crtc_y = (vdisplay - crtc_state->src_h) / 2;
-			crtc_state->crtc_h = crtc_state->src_h;
+			crtc_state->crtc_rect.y = (vdisplay - crtc_state->src_rect.h) / 2;
+			crtc_state->crtc_rect.h = crtc_state->src_rect.h;
 		}
 	}
 
@@ -1134,19 +1143,34 @@ static int display_logo(struct display_state *state)
 	return 0;
 }
 
-static int get_crtc_id(ofnode connect)
+static int get_crtc_id(ofnode connect, bool is_ports_node)
 {
-	int phandle;
+	struct device_node *port_node;
 	struct device_node *remote;
+	int phandle;
 	int val;
 
-	phandle = ofnode_read_u32_default(connect, "remote-endpoint", -1);
-	if (phandle < 0)
-		goto err;
-	remote = of_find_node_by_phandle(phandle);
-	val = ofnode_read_u32_default(np_to_ofnode(remote), "reg", -1);
-	if (val < 0)
-		goto err;
+	if (is_ports_node) {
+		port_node = of_get_parent(connect.np);
+		if (!port_node)
+			goto err;
+
+		val = ofnode_read_u32_default(np_to_ofnode(port_node), "reg", -1);
+		if (val < 0)
+			goto err;
+	} else {
+		phandle = ofnode_read_u32_default(connect, "remote-endpoint", -1);
+		if (phandle < 0)
+			goto err;
+
+		remote = of_find_node_by_phandle(phandle);
+		if (!remote)
+			goto err;
+
+		val = ofnode_read_u32_default(np_to_ofnode(remote), "reg", -1);
+		if (val < 0)
+			goto err;
+	}
 
 	return val;
 err:
@@ -1543,59 +1567,71 @@ found:
 	return (struct rockchip_panel *)dev_get_driver_data(panel_dev);
 }
 
-static struct rockchip_bridge *rockchip_of_find_bridge(struct udevice *conn_dev)
+static struct rockchip_bridge *rockchip_ofnode_find_bridge(ofnode node)
 {
-	ofnode node, ports, port, ep;
 	struct udevice *dev;
 	int ret;
 
-	ports = dev_read_subnode(conn_dev, "ports");
+	ret = uclass_get_device_by_ofnode(UCLASS_VIDEO_BRIDGE, node, &dev);
+	if (ret)
+		return ERR_PTR(ret);
+
+	return (struct rockchip_bridge *)dev_get_driver_data(dev);
+}
+
+static int rockchip_of_find_bridge(ofnode node, struct rockchip_bridge **bridge)
+{
+	ofnode remote, ports, port, ep;
+	int ret = -EPROBE_DEFER;
+	u32 reg;
+
+	if (!bridge)
+		return -EINVAL;
+
+	ports = ofnode_find_subnode(node, "ports");
 	if (!ofnode_valid(ports))
-		return NULL;
+		return -ENODEV;
 
 	ofnode_for_each_subnode(port, ports) {
-		u32 reg;
-
 		if (ofnode_read_u32(port, "reg", &reg))
 			continue;
 
-		if (reg != PORT_DIR_OUT)
-			continue;
-
-		ofnode_for_each_subnode(ep, port) {
-			ofnode _ep, _port, _ports;
-			uint phandle;
-
-			if (ofnode_read_u32(ep, "remote-endpoint", &phandle))
-				continue;
-
-			_ep = ofnode_get_by_phandle(phandle);
-			if (!ofnode_valid(_ep))
-				continue;
-
-			_port = ofnode_get_parent(_ep);
-			if (!ofnode_valid(_port))
-				continue;
-
-			_ports = ofnode_get_parent(_port);
-			if (!ofnode_valid(_ports))
-				continue;
-
-			node = ofnode_get_parent(_ports);
-			if (!ofnode_valid(node))
-				continue;
-
-			ret = uclass_get_device_by_ofnode(UCLASS_VIDEO_BRIDGE,
-							  node, &dev);
-			if (!ret)
-				goto found;
-		}
+		if (reg == PORT_DIR_OUT)
+			break;
 	}
 
-	return NULL;
+	if (reg != PORT_DIR_OUT)
+		return -ENODEV;
 
-found:
-	return (struct rockchip_bridge *)dev_get_driver_data(dev);
+	ofnode_for_each_subnode(ep, port) {
+		ofnode _ep, _port, _ports;
+		uint phandle;
+
+		if (ofnode_read_u32(ep, "remote-endpoint", &phandle))
+			continue;
+
+		_ep = ofnode_get_by_phandle(phandle);
+		if (!ofnode_valid(_ep))
+			continue;
+
+		_port = ofnode_get_parent(_ep);
+		if (!ofnode_valid(_port))
+			continue;
+
+		_ports = ofnode_get_parent(_port);
+		if (!ofnode_valid(_ports))
+			continue;
+
+		remote = ofnode_get_parent(_ports);
+		if (ofnode_valid(remote))
+			break;
+	}
+
+	*bridge = rockchip_ofnode_find_bridge(remote);
+	if (!IS_ERR(*bridge))
+		ret = 0;
+
+	return ret;
 }
 
 static struct udevice *rockchip_of_find_connector(ofnode endpoint)
@@ -1744,7 +1780,7 @@ static int rockchip_display_probe(struct udevice *dev)
 	struct rockchip_crtc *crtc;
 	const struct rockchip_connector *conn;
 	struct rockchip_panel *panel = NULL;
-	struct rockchip_bridge *bridge = NULL;
+	struct rockchip_bridge *bridge = NULL, *b = NULL;
 	struct rockchip_phy *phy = NULL;
 	struct display_state *s;
 	const char *name;
@@ -1855,11 +1891,28 @@ static int rockchip_display_probe(struct udevice *dev)
 
 		phy = rockchip_of_find_phy(conn_dev);
 
-		bridge = rockchip_of_find_bridge(conn_dev);
-		if (bridge)
-			panel = rockchip_of_find_panel(bridge->dev);
-		else
-			panel = rockchip_of_find_panel(conn_dev);
+		panel = rockchip_of_find_panel(conn_dev);
+		if (!panel) {
+			/* No panel found yet, check for a bridge next. */
+			ret = rockchip_of_find_bridge(dev_ofnode(conn_dev), &bridge);
+			if (ret && ret != -ENODEV)
+				continue;
+
+			b = bridge;
+			while (b) {
+				struct rockchip_bridge *next_bridge = NULL;
+
+				ret = rockchip_of_find_bridge(dev_ofnode(b->dev), &next_bridge);
+				if (ret)
+					break;
+
+				b->next_bridge = next_bridge;
+				b = next_bridge;
+			}
+
+			if (b)
+				panel = rockchip_of_find_panel(b->dev);
+		}
 
 		s = malloc(sizeof(*s));
 		if (!s)
@@ -1908,7 +1961,7 @@ static int rockchip_display_probe(struct udevice *dev)
 		s->crtc_state.node = np_to_ofnode(vop_node);
 		s->crtc_state.dev = crtc_dev;
 		s->crtc_state.crtc = crtc;
-		s->crtc_state.crtc_id = get_crtc_id(np_to_ofnode(ep_node));
+		s->crtc_state.crtc_id = get_crtc_id(np_to_ofnode(ep_node), is_ports_node);
 		s->node = node;
 
 		if (is_ports_node) { /* only vop2 will get into here */
@@ -1951,12 +2004,6 @@ static int rockchip_display_probe(struct udevice *dev)
 				get_plane_mask_from_dts = true;
 			}
 		}
-
-		if (bridge)
-			bridge->state = s;
-
-		if (panel)
-			panel->state = s;
 
 		get_crtc_mcu_mode(&s->crtc_state);
 

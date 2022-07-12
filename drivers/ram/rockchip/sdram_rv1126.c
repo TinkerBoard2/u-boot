@@ -2590,7 +2590,8 @@ static u64 dram_detect_cap(struct dram_info *dram,
 				goto cap_err;
 
 			sdram_detect_bank(cap_info, coltmp, bktmp);
-			sdram_detect_dbw(cap_info, dram_type);
+			if (dram_type != LPDDR3)
+				sdram_detect_dbw(cap_info, dram_type);
 		} else {
 			coltmp = 10;
 			bktmp = 4;
@@ -2693,6 +2694,9 @@ static u64 dram_detect_cap(struct dram_info *dram,
 		cap_info->cs1_row = 0;
 		cap_info->cs1_high16bit_row = 0;
 	}
+
+	if (dram_type == LPDDR3)
+		sdram_detect_dbw(cap_info, dram_type);
 
 	return 0;
 cap_err:
@@ -3221,15 +3225,15 @@ static void pctl_modify_trfc(struct ddr_pctl_regs *pctl_regs,
 				tmp = pctl_regs->pctl[i][1];
 				/* t_xs_x32 */
 				tmp &= ~((u32)0x7f);
-				tmp |= ((txsnr + 63) / 64) & 0x7f;
+				tmp |= ((txsnr + 63) / 64 + 1) & 0x7f;
 
 				if (dram_type == DDR4) {
 					/* t_xs_abort_x32 */
 					tmp &= ~((u32)(0x7f << 16));
-					tmp |= (((txs_abort_fast + 63) / 64) & 0x7f) << 16;
+					tmp |= (((txs_abort_fast + 63) / 64 + 1) & 0x7f) << 16;
 					/* t_xs_fast_x32 */
 					tmp &= ~((u32)(0x7f << 24));
-					tmp |= (((txs_abort_fast + 63) / 64) & 0x7f) << 24;
+					tmp |= (((txs_abort_fast + 63) / 64 + 1) & 0x7f) << 24;
 				}
 
 				pctl_regs->pctl[i][1] = tmp;

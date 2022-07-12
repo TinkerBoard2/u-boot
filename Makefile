@@ -651,6 +651,7 @@ HAVE_VENDOR_COMMON_LIB = $(if $(wildcard $(srctree)/board/$(VENDOR)/common/Makef
 libs-y += lib/
 libs-$(HAVE_VENDOR_COMMON_LIB) += board/$(VENDOR)/common/
 libs-$(CONFIG_OF_EMBED) += dts/
+ifneq ($(CONFIG_SPL_BUILD)$(CONFIG_SPL_DECOMP_HEADER),yy)
 libs-y += fs/
 libs-y += net/
 libs-y += disk/
@@ -700,6 +701,7 @@ libs-y += common/
 libs-y += env/
 libs-$(CONFIG_API) += api/
 libs-$(CONFIG_HAS_POST) += post/
+endif
 libs-y += test/
 libs-y += test/dm/
 libs-$(CONFIG_UT_ENV) += test/env/
@@ -1483,7 +1485,7 @@ checkarmreloc: u-boot
 		false; \
 	fi
 
-envtools: scripts_basic
+envtools: scripts_basic $(version_h) $(timestamp_h)
 	$(Q)$(MAKE) $(build)=tools/env
 
 tools-only: scripts_basic $(version_h) $(timestamp_h)
@@ -1699,6 +1701,13 @@ endif
 	$(Q)$(MAKE) KBUILD_MODULES=$(if $(CONFIG_MODULES),1)   \
 	$(build)=$(build-dir) $(@:.ko=.o)
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
+
+quiet_cmd_genenv = GENENV $@
+cmd_genenv = $(OBJCOPY) --dump-section .rodata.default_environment=$@ env/common.o; \
+	sed --in-place -e 's/\x00/\x0A/g' $@
+
+u-boot-initial-env: u-boot.bin
+	$(call if_changed,genenv)
 
 # FIXME Should go into a make.lib or something
 # ===========================================================================

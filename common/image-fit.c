@@ -1194,10 +1194,12 @@ int fit_calculate_hash(const void *data, int data_len,
 			     (unsigned char *)value, CHUNKSZ_SHA1);
 		*value_len = 20;
 #endif
+#ifdef CONFIG_SHA256
 	} else if (IMAGE_ENABLE_SHA256 && strcmp(algo, "sha256") == 0) {
 		sha256_csum_wd((unsigned char *)data, data_len,
 			       (unsigned char *)value, CHUNKSZ_SHA256);
 		*value_len = SHA256_SUM_LEN;
+#endif
 #ifdef CONFIG_MD5
 	} else if (IMAGE_ENABLE_MD5 && strcmp(algo, "md5") == 0) {
 		md5_wd((unsigned char *)data, data_len, value, CHUNKSZ_MD5);
@@ -1933,8 +1935,13 @@ void fit_conf_print(const void *fit, int noffset, const char *p)
 
 static int fit_image_select(const void *fit, int rd_noffset, int verify)
 {
+#ifdef USE_HOSTCC
 	fit_image_print(fit, rd_noffset, "   ");
-
+#else
+#if CONFIG_IS_ENABLED(FIT_PRINT)
+	fit_image_print(fit, rd_noffset, "   ");
+#endif
+#endif
 	if (verify) {
 		puts("   Verifying Hash Integrity ... ");
 		if (!fit_image_verify(fit, rd_noffset)) {

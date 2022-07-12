@@ -94,6 +94,12 @@ int __weak spl_board_prepare_for_jump(struct spl_image_info *spl_image)
 	return 0;
 }
 
+/* Fix storages, like iomux  */
+__weak void spl_board_storages_fixup(struct spl_image_loader *loader)
+{
+	/* Nothing to do! */
+}
+
 void spl_fixup_fdt(void)
 {
 #if defined(CONFIG_SPL_OF_LIBFDT) && defined(CONFIG_SYS_SPL_ARGS_ADDR)
@@ -449,6 +455,8 @@ static int boot_from_devices(struct spl_image_info *spl_image,
 			spl_image->boot_device = spl_boot_list[i];
 			return 0;
 		}
+
+		spl_board_storages_fixup(loader);
 	}
 
 	return -ENODEV;
@@ -479,6 +487,19 @@ static int spl_initr_dm(void)
 static int spl_initr_dm(void)
 {
 	return 0;
+}
+#endif
+
+#if defined(CONFIG_SPL_KERNEL_BOOT) && !defined(CONFIG_ARM64)
+static void boot_jump_linux(struct spl_image_info *spl_image)
+{
+	void (*kernel_entry)(int zero, int arch, ulong params);
+
+	printf("Jumping to %s(0x%08lx)\n", "Kernel",
+	       (ulong)spl_image->entry_point_os);
+	spl_cleanup_before_jump(spl_image);
+	kernel_entry = (void (*)(int, int, ulong))spl_image->entry_point_os;
+	kernel_entry(0, 0, (ulong)spl_image->fdt_addr);
 }
 #endif
 
@@ -560,6 +581,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 	switch (spl_image.os) {
 	case IH_OS_U_BOOT:
 		debug("Jumping to U-Boot\n");
+		spl_cleanup_before_jump(&spl_image);
 		break;
 #if CONFIG_IS_ENABLED(ATF)
 	case IH_OS_ARM_TRUSTED_FIRMWARE:
@@ -584,13 +606,16 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 				(void *)spl_image.entry_point);
 		break;
 #endif
-#ifdef CONFIG_SPL_OS_BOOT
 	case IH_OS_LINUX:
+#ifdef CONFIG_SPL_OS_BOOT
 		debug("Jumping to Linux\n");
 		spl_fixup_fdt();
 		spl_board_prepare_for_linux();
 		jump_to_image_linux(&spl_image);
+#elif defined(CONFIG_SPL_KERNEL_BOOT) && !defined(CONFIG_ARM64)
+		boot_jump_linux(&spl_image);
 #endif
+		break;
 	default:
 		debug("Unsupported OS image.. Jumping nevertheless..\n");
 	}
@@ -610,7 +635,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 		debug("Failed to stash bootstage: err=%d\n", ret);
 #endif
 
-	debug("loaded - jumping to U-Boot...\n");
+	printf("Jumping to U-Boot(0x%08lx)\n", spl_image.entry_point);
 	spl_board_prepare_for_boot();
 	jump_to_image_no_args(&spl_image);
 }
